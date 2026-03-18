@@ -30,5 +30,5 @@ tworzymy aplikację w 3 wartowej strukturze podzielonej następująco:
 
 Aplikacja jest budowana głownie w javie z wykorzystaniem React oraz Spring. Baza danych jest zaimplementowana w CSV (SQL), aczkolwiek jesteśmy otwarci na sugestie co do wyboru bazy danych.  
 
-## przyszły rozwój
+## Przyszły rozwój
 - automatyczna optymalizacja harmonogramów
