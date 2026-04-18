@@ -1,0 +1,101 @@
+[
+  {
+    "name": "Analiza wymagań",
+    "startTime": "2026-05-01T08:00",
+    "endTime": "2026-05-04T16:00",
+    "workerCount": 3,
+    "resources": "Sala konferencyjna",
+    "totalCost": 4500.00,
+    "crashingCostPerDay": 800.00,
+    "maxCrashingDays": 1,
+    "predecessorIds": ""
+  },
+  {
+    "name": "Projekt architektury",
+    "startTime": "2026-05-05T08:00",
+    "endTime": "2026-05-09T16:00",
+    "workerCount": 2,
+    "resources": "Komputer, Licencja UML",
+    "totalCost": 6000.00,
+    "crashingCostPerDay": 1200.00,
+    "maxCrashingDays": 2,
+    "predecessorIds": "1"
+  },
+  {
+    "name": "Przygotowanie środowiska",
+    "startTime": "2026-05-05T08:00",
+    "endTime": "2026-05-07T16:00",
+    "workerCount": 1,
+    "resources": "Serwer, Docker",
+    "totalCost": 2000.00,
+    "crashingCostPerDay": 500.00,
+    "maxCrashingDays": 1,
+    "predecessorIds": "1"
+  },
+  {
+    "name": "Implementacja backendu",
+    "startTime": "2026-05-10T08:00",
+    "endTime": "2026-05-17T16:00",
+    "workerCount": 4,
+    "resources": "Serwer, IDE",
+    "totalCost": 16000.00,
+    "crashingCostPerDay": 2500.00,
+    "maxCrashingDays": 3,
+    "predecessorIds": "2,3"
+  },
+  {
+    "name": "Implementacja frontendu",
+    "startTime": "2026-05-10T08:00",
+    "endTime": "2026-05-16T16:00",
+    "workerCount": 3,
+    "resources": "Komputer, Figma",
+    "totalCost": 12000.00,
+    "crashingCostPerDay": 2000.00,
+    "maxCrashingDays": 2,
+    "predecessorIds": "2"
+  },
+  {
+    "name": "Testy jednostkowe",
+    "startTime": "2026-05-18T08:00",
+    "endTime": "2026-05-21T16:00",
+    "workerCount": 2,
+    "resources": "JUnit, Jest",
+    "totalCost": 5000.00,
+    "crashingCostPerDay": 1000.00,
+    "maxCrashingDays": 1,
+    "predecessorIds": "4,5"
+  },
+  {
+    "name": "Testy integracyjne",
+    "startTime": "2026-05-22T08:00",
+    "endTime": "2026-05-25T16:00",
+    "workerCount": 2,
+    "resources": "Serwer testowy",
+    "totalCost": 4000.00,
+    "crashingCostPerDay": 900.00,
+    "maxCrashingDays": 1,
+    "predecessorIds": "6"
+  },
+  {
+    "name": "Dokumentacja",
+    "startTime": "2026-05-18T08:00",
+    "endTime": "2026-05-23T16:00",
+    "workerCount": 1,
+    "resources": "Confluence",
+    "totalCost": 3000.00,
+    "crashingCostPerDay": 600.00,
+    "maxCrashingDays": 2,
+    "predecessorIds": "4,5"
+  },
+  {
+    "name": "Wdrożenie na produkcję",
+    "startTime": "2026-05-26T08:00",
+    "endTime": "2026-05-28T16:00",
+    "workerCount": 3,
+    "resources": "Serwer produkcyjny, CI/CD",
+    "totalCost": 5000.00,
+    "crashingCostPerDay": 1500.00,
+    "maxCrashingDays": 1,
+    "predecessorIds": "7,8"
+  }
+]

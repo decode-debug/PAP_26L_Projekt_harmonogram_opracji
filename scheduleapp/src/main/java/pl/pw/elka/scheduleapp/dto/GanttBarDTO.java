@@ -1,6 +1,7 @@
 package pl.pw.elka.scheduleapp.dto;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 
@@ -27,4 +28,5 @@ public class GanttBarDTO {
     private int workerCount;
     private String resources;
     private String color;            // kolor paska wyliczony na backendzie
+    private List<Long> predecessorIds; // ID operacji poprzedzających
 }

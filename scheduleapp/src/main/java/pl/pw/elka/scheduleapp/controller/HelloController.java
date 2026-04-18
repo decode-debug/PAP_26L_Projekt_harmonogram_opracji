@@ -3,8 +3,10 @@ package pl.pw.elka.scheduleapp.controller;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ContentDisposition;
@@ -192,6 +194,17 @@ public class HelloController {
             bar.setWorkerCount(op.getWorkerCount() != null ? op.getWorkerCount() : 0);
             bar.setResources(op.getResources());
             bar.setColor(colors[i % colors.length]);
+
+            // Parsuj predecessorIds
+            List<Long> predIds = new ArrayList<>();
+            if (op.getPredecessorIds() != null && !op.getPredecessorIds().isBlank()) {
+                predIds = Arrays.stream(op.getPredecessorIds().split(","))
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .map(Long::parseLong)
+                        .collect(Collectors.toList());
+            }
+            bar.setPredecessorIds(predIds);
 
             bars.add(bar);
         }

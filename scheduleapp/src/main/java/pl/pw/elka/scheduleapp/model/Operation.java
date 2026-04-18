@@ -45,6 +45,9 @@ public class Operation {
     private Double crashingCostPerDay;
     private Integer maxCrashingDays;
 
+    // Operacje poprzedzające — przechowywane jako tekst "1,3,5"
+    private String predecessorIds;
+
     // Metoda pomocnicza
     public long getDurationInHours() {
         if (startTime != null && endTime != null) {

@@ -25,12 +25,35 @@ function GanttChart({ ganttData }) {
   const chartPadding = 20;
   const headerHeight = 40;
   const chartHeight = headerHeight + bars.length * (barHeight + barGap) + chartPadding;
+  const chartContentWidth = Math.max(600, fullDays * 80 + labelWidth + chartPadding * 2);
+
+  // Mapa operationId -> indeks w tablicy bars
+  const idToIndex = {};
+  bars.forEach((b, i) => { idToIndex[b.operationId] = i; });
+
+  // Generuj strzałki zależności
+  const arrows = [];
+  bars.forEach((bar, i) => {
+    if (bar.predecessorIds && bar.predecessorIds.length > 0) {
+      bar.predecessorIds.forEach(predId => {
+        const predIdx = idToIndex[predId];
+        if (predIdx === undefined) return;
+        const pred = bars[predIdx];
+        // Strzałka: koniec paska poprzednika → początek paska bieżącego
+        const fromXPercent = ((pred.startOffsetDays + pred.durationDays) / totalDays) * 100;
+        const toXPercent = (bar.startOffsetDays / totalDays) * 100;
+        const fromY = headerHeight + predIdx * (barHeight + barGap) + barGap + barHeight / 2;
+        const toY = headerHeight + i * (barHeight + barGap) + barGap + barHeight / 2;
+        arrows.push({ fromXPercent, toXPercent, fromY, toY, key: `${predId}-${bar.operationId}` });
+      });
+    }
+  });
 
   return (
     <div style={{ overflowX: 'auto', marginTop: '10px' }}>
       <div style={{
         position: 'relative',
-        minWidth: Math.max(600, fullDays * 80 + labelWidth + chartPadding * 2) + 'px',
+        minWidth: chartContentWidth + 'px',
         height: chartHeight + 'px',
         background: '#222',
         borderRadius: '8px',
@@ -64,6 +87,32 @@ function GanttChart({ ganttData }) {
             pointerEvents: 'none'
           }} />
         ))}
+
+        {/* Strzałki zależności (SVG) */}
+        <svg style={{
+          position: 'absolute',
+          top: 0,
+          left: labelWidth + chartPadding + 'px',
+          width: `calc(100% - ${labelWidth + chartPadding * 2}px)`,
+          height: '100%',
+          pointerEvents: 'none',
+          overflow: 'visible'
+        }}>
+          {arrows.map(a => {
+            const x1 = `${a.fromXPercent}%`;
+            const x2 = `${a.toXPercent}%`;
+            const y1 = a.fromY;
+            const y2 = a.toY;
+            return (
+              <g key={a.key}>
+                <line x1={x1} y1={y1} x2={x2} y2={y2}
+                  stroke="#ff9800" strokeWidth="2" strokeDasharray="6,3" opacity="0.7" />
+                {/* Grot strzałki */}
+                <circle cx={x2} cy={y2} r="4" fill="#ff9800" opacity="0.8" />
+              </g>
+            );
+          })}
+        </svg>
 
         {/* Paski operacji */}
         {bars.map((bar, i) => {
@@ -137,10 +186,12 @@ function App() {
     resources: '',
     totalCost: 0,
     crashingCostPerDay: 0,
-    maxCrashingDays: 0
+    maxCrashingDays: 0,
+    predecessorIds: ''
   });
   const [error, setError] = useState('');
   const fileInputRef = useRef(null);
+  const [selectedPredecessors, setSelectedPredecessors] = useState([]);
 
   const fetchOperations = async () => {
     try {
@@ -176,11 +227,16 @@ function App() {
     setError('');
 
     try {
-      await axios.post('/api/operations', formData);
+      const dataToSend = {
+        ...formData,
+        predecessorIds: selectedPredecessors.join(',')
+      };
+      await axios.post('/api/operations', dataToSend);
       setFormData({
         name: '', startTime: '', endTime: '', workerCount: 1, resources: '',
-        totalCost: 0, crashingCostPerDay: 0, maxCrashingDays: 0
+        totalCost: 0, crashingCostPerDay: 0, maxCrashingDays: 0, predecessorIds: ''
       });
+      setSelectedPredecessors([]);
       refreshAll();
     } catch (err) {
       const msg = err.response?.data || "Błąd zapisu — upewnij się, że backend działa.";
@@ -285,6 +341,33 @@ function App() {
         <input type="number" min="0" value={formData.maxCrashingDays}
           onChange={e => setFormData({...formData, maxCrashingDays: parseInt(e.target.value) || 0})} />
 
+        {operations.length > 0 && (
+          <>
+            <label>Operacje poprzedzające:</label>
+            <div style={{
+              border: '1px solid #555', borderRadius: '4px', padding: '8px',
+              background: '#2a2a2a', maxHeight: '150px', overflowY: 'auto'
+            }}>
+              {operations.map(op => (
+                <label key={op.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '3px 0', cursor: 'pointer', fontSize: '14px' }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedPredecessors.includes(op.id)}
+                    onChange={e => {
+                      if (e.target.checked) {
+                        setSelectedPredecessors([...selectedPredecessors, op.id]);
+                      } else {
+                        setSelectedPredecessors(selectedPredecessors.filter(id => id !== op.id));
+                      }
+                    }}
+                  />
+                  {op.name} (ID: {op.id})
+                </label>
+              ))}
+            </div>
+          </>
+        )}
+
         <button type="submit" style={{ background: '#28a745', color: 'white', padding: '12px', cursor: 'pointer', border: 'none', fontWeight: 'bold', marginTop: '10px' }}>
           ZAPISZ OPERACJĘ
         </button>
@@ -303,6 +386,7 @@ function App() {
             <th>Koszt całkowity</th>
             <th>Koszt skracania/doba</th>
             <th>Maks. skrócenie</th>
+            <th>Poprzedniki</th>
             <th>Akcje</th>
           </tr>
         </thead>
@@ -318,6 +402,12 @@ function App() {
               <td>{op.totalCost != null ? op.totalCost.toLocaleString() + ' PLN' : '0 PLN'}</td>
               <td style={{ color: '#ff6b6b' }}>{op.crashingCostPerDay != null ? op.crashingCostPerDay.toLocaleString() + ' PLN' : '0 PLN'}</td>
               <td style={{ color: '#4da3ff' }}>{op.maxCrashingDays != null ? op.maxCrashingDays + ' dni' : '0 dni'}</td>
+              <td style={{ color: '#ff9800', fontSize: '12px' }}>
+                {op.predecessorIds ? op.predecessorIds.split(',').map(pid => {
+                  const pred = operations.find(o => o.id === parseInt(pid.trim()));
+                  return pred ? pred.name : pid.trim();
+                }).join(', ') : '-'}
+              </td>
               <td>
                 <button onClick={() => handleDelete(op.id)}
                   style={{ background: '#dc3545', color: 'white', border: 'none', padding: '4px 10px', cursor: 'pointer', borderRadius: '3px' }}>
@@ -327,7 +417,7 @@ function App() {
             </tr>
           )) : (
             <tr>
-              <td colSpan="10" style={{ padding: '20px', textAlign: 'center' }}>Brak operacji w bazie danych.</td>
+              <td colSpan="11" style={{ padding: '20px', textAlign: 'center' }}>Brak operacji w bazie danych.</td>
             </tr>
           )}
         </tbody>
