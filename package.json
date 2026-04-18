@@ -1,5 +1,9 @@
 {
-  "dependencies": {
-    "axios": "^1.15.0"
+  "name": "pap-scheduleapp",
+  "private": true,
+  "scripts": {
+    "dev:frontend": "cd scheduleapp/frontend && npm run dev",
+    "dev:backend": "cd scheduleapp && mvnw.cmd spring-boot:run",
+    "install:frontend": "cd scheduleapp/frontend && npm install"
   }
 }
