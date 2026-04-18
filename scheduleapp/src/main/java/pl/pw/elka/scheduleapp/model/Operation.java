@@ -41,6 +41,7 @@ public class Operation {
 
     private Double totalCost;
     private Double crashingCostPerDay;
+    private Integer maxCrashingDays;
 
     // Metoda pomocnicza
     public long getDurationInHours() {
