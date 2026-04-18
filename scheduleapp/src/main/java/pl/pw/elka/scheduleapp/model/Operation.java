@@ -3,6 +3,8 @@ package pl.pw.elka.scheduleapp.model;
 import java.time.Duration;
 import java.time.LocalDateTime;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
+
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -25,18 +27,22 @@ public class Operation {
     private Long id;
 
     private String name;
+
+    // Poprawka: Dodajemy leniwe parsowanie, aby Java nie wyrzuciła błędu,
+    // jeśli sekundy zostaną przesłane lub pominięte
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm[:ss]")
     private LocalDateTime startTime;
+
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm[:ss]")
     private LocalDateTime endTime;
 
-    // Zasoby i pracownicy
     private Integer workerCount;
-    private String resources; // Tu możesz wpisać np. "Tokarka, Wiertarka"
+    private String resources;
 
-    // Finanse i optymalizacja
     private Double totalCost;
-    private Double crashingCostPerDay; // Koszt skrócenia operacji o 1 dzień
+    private Double crashingCostPerDay;
 
-    // Metoda pomocnicza do wyliczania długości w godzinach
+    // Metoda pomocnicza
     public long getDurationInHours() {
         if (startTime != null && endTime != null) {
             return Duration.between(startTime, endTime).toHours();
