@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 
 function App() {
@@ -14,6 +14,7 @@ function App() {
     maxCrashingDays: 0
   });
   const [error, setError] = useState('');
+  const fileInputRef = useRef(null);
 
   const fetchOperations = async () => {
     try {
@@ -47,11 +48,85 @@ function App() {
     }
   };
 
+  const handleDelete = async (id) => {
+    if (!confirm("Czy na pewno chcesz usunąć tę operację?")) return;
+    try {
+      await axios.delete(`/api/operations/${id}`);
+      fetchOperations();
+    } catch (err) {
+      setError("Błąd usuwania operacji.");
+    }
+  };
+
+  const handleDeleteAll = async () => {
+    if (!confirm("Czy na pewno chcesz usunąć WSZYSTKIE operacje?")) return;
+    try {
+      await axios.delete('/api/operations');
+      fetchOperations();
+    } catch (err) {
+      setError("Błąd usuwania operacji.");
+    }
+  };
+
+  const handleExport = async () => {
+    try {
+      const res = await axios.get('/api/operations/export');
+      const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `harmonogram_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError("Błąd eksportu danych.");
+    }
+  };
+
+  const handleImport = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!Array.isArray(data)) {
+        setError("Plik musi zawierać tablicę operacji.");
+        return;
+      }
+      if (!confirm(`Wczytać ${data.length} operacji z pliku? Obecne dane zostaną zastąpione.`)) return;
+      await axios.post('/api/operations/import', data);
+      fetchOperations();
+      setError('');
+    } catch (err) {
+      const msg = err.response?.data || "Błąd importu — sprawdź format pliku.";
+      setError(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+    fileInputRef.current.value = '';
+  };
+
+  const btnStyle = { padding: '8px 16px', cursor: 'pointer', border: 'none', fontWeight: 'bold', borderRadius: '4px' };
+
   return (
     <div style={{ padding: '20px', fontFamily: 'Arial', color: 'white', backgroundColor: '#1a1a1a', minHeight: '100vh' }}>
       <h1>Harmonogram Operacji</h1>
 
       {error && <div style={{ color: '#ff6b6b', marginBottom: '15px', padding: '10px', border: '1px solid #ff6b6b', borderRadius: '4px' }}>{error}</div>}
+
+      <div style={{ marginBottom: '20px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+        <button onClick={handleExport} style={{ ...btnStyle, background: '#17a2b8', color: 'white' }}>
+          Zapisz do pliku (JSON)
+        </button>
+        <button onClick={() => fileInputRef.current.click()} style={{ ...btnStyle, background: '#ffc107', color: 'black' }}>
+          Wczytaj z pliku (JSON)
+        </button>
+        <input ref={fileInputRef} type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} />
+        {operations.length > 0 && (
+          <button onClick={handleDeleteAll} style={{ ...btnStyle, background: '#dc3545', color: 'white' }}>
+            Usuń wszystkie
+          </button>
+        )}
+      </div>
 
       <form onSubmit={handleSubmit} style={{ marginBottom: '40px', display: 'grid', gap: '10px', maxWidth: '450px' }}>
         <label>Nazwa operacji:</label>
@@ -100,6 +175,7 @@ function App() {
             <th>Koszt całkowity</th>
             <th>Koszt skracania/doba</th>
             <th>Maks. skrócenie</th>
+            <th>Akcje</th>
           </tr>
         </thead>
         <tbody>
@@ -114,10 +190,16 @@ function App() {
               <td>{op.totalCost != null ? op.totalCost.toLocaleString() + ' PLN' : '0 PLN'}</td>
               <td style={{ color: '#ff6b6b' }}>{op.crashingCostPerDay != null ? op.crashingCostPerDay.toLocaleString() + ' PLN' : '0 PLN'}</td>
               <td style={{ color: '#4da3ff' }}>{op.maxCrashingDays != null ? op.maxCrashingDays + ' dni' : '0 dni'}</td>
+              <td>
+                <button onClick={() => handleDelete(op.id)}
+                  style={{ background: '#dc3545', color: 'white', border: 'none', padding: '4px 10px', cursor: 'pointer', borderRadius: '3px' }}>
+                  Usuń
+                </button>
+              </td>
             </tr>
           )) : (
             <tr>
-              <td colSpan="9" style={{ padding: '20px', textAlign: 'center' }}>Brak operacji w bazie danych.</td>
+              <td colSpan="10" style={{ padding: '20px', textAlign: 'center' }}>Brak operacji w bazie danych.</td>
             </tr>
           )}
         </tbody>

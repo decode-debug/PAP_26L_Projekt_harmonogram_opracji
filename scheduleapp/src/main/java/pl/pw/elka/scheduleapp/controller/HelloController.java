@@ -6,7 +6,9 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -60,6 +62,38 @@ public class HelloController {
         }
 
         Operation saved = operationRepository.save(operation);
+        return ResponseEntity.ok(saved);
+    }
+
+    @DeleteMapping("/operations/{id}")
+    public ResponseEntity<?> deleteOperation(@PathVariable Long id) {
+        if (!operationRepository.existsById(id)) {
+            return ResponseEntity.badRequest().body("Operacja o ID " + id + " nie istnieje.");
+        }
+        operationRepository.deleteById(id);
+        return ResponseEntity.ok("Usunięto operację o ID " + id);
+    }
+
+    @DeleteMapping("/operations")
+    public ResponseEntity<?> deleteAllOperations() {
+        operationRepository.deleteAll();
+        return ResponseEntity.ok("Usunięto wszystkie operacje.");
+    }
+
+    // Eksport — zwraca wszystkie operacje jako JSON (do pobrania jako plik)
+    @GetMapping("/operations/export")
+    public List<Operation> exportOperations() {
+        return operationRepository.findAll();
+    }
+
+    // Import — zastępuje wszystkie operacje danymi z pliku JSON
+    @PostMapping("/operations/import")
+    public ResponseEntity<?> importOperations(@RequestBody List<Operation> operations) {
+        operationRepository.deleteAll();
+        for (Operation op : operations) {
+            op.setId(null); // wymuś nowe ID
+        }
+        List<Operation> saved = operationRepository.saveAll(operations);
         return ResponseEntity.ok(saved);
     }
 
