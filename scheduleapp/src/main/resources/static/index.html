@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dodaj Operację</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; line-height: 1.6; }
+        .form-group { margin-bottom: 10px; }
+        label { display: inline-block; width: 150px; }
+        input, select { padding: 5px; width: 250px; }
+        button { padding: 10px 20px; background: #28a745; color: white; border: none; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h2>Nowa Operacja</h2>
+    <div class="form-group">
+        <label>Nazwa:</label>
+        <input type="text" id="name">
+    </div>
+    <div class="form-group">
+        <label>Start:</label>
+        <input type="datetime-local" id="startTime">
+    </div>
+    <div class="form-group">
+        <label>Koniec:</label>
+        <input type="datetime-local" id="endTime">
+    </div>
+    <div class="form-group">
+        <label>Liczba pracowników:</label>
+        <select id="workerCount">
+            <option value="1">1 pracownik</option>
+            <option value="2">2 pracowników</option>
+            <option value="5">5 pracowników</option>
+            <option value="10">10 pracowników</option>
+        </select>
+    </div>
+    <div class="form-group">
+        <label>Zasoby:</label>
+        <input type="text" id="resources">
+    </div>
+    <div class="form-group">
+        <label>Koszt całkowity:</label>
+        <input type="number" id="totalCost">
+    </div>
+    <div class="form-group">
+        <label>Koszt skracania/dzień:</label>
+        <input type="number" id="crashingCostPerDay">
+    </div>
+    <button onclick="sendData()">Zapisz operację</button>
+
+    <script>
+        async function sendData() {
+            const data = {
+                name: document.getElementById('name').value,
+                startTime: document.getElementById('startTime').value,
+                endTime: document.getElementById('endTime').value,
+                workerCount: parseInt(document.getElementById('workerCount').value),
+                resources: document.getElementById('resources').value,
+                totalCost: parseFloat(document.getElementById('totalCost').value),
+                crashingCostPerDay: parseFloat(document.getElementById('crashingCostPerDay').value)
+            };
+
+            const response = await fetch('/api/operations', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            if (response.ok) {
+                alert('Zapisano pomyślnie!');
+                window.location.href = '/operations'; // Przekieruj do listy JSON
+            } else {
+                alert('Błąd zapisu!');
+            }
+        }
+    </script>
+</body>
+</html>

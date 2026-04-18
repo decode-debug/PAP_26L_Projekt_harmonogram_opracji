@@ -7,5 +7,9 @@ import pl.pw.elka.scheduleapp.model.Operation;
 
 @Repository
 public interface OperationRepository extends JpaRepository<Operation, Long> {
-    // Tu na razie nic nie musisz pisać - Spring sam wygeneruje metody save(), findAll(), itp.
+    // Dzięki dziedziczeniu po JpaRepository masz od razu metody:
+    // save(operation) - zapisz/edytuj
+    // findAll() - pobierz wszystkie
+    // deleteById(id) - usuń
+    // findById(id) - znajdź jedną
 }
