@@ -1,8 +1,134 @@
 import { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 
+function GanttChart({ ganttData }) {
+  if (!ganttData || !ganttData.bars || ganttData.bars.length === 0) {
+    return <p style={{ color: '#888' }}>Brak operacji do wyświetlenia na wykresie.</p>;
+  }
+
+  const { projectStart, projectEnd, totalDays, bars } = ganttData;
+  const startDate = new Date(projectStart);
+  const endDate = new Date(projectEnd);
+
+  // Generuj etykiety osi czasu (daty)
+  const timeLabels = [];
+  const fullDays = Math.ceil(totalDays);
+  for (let i = 0; i <= fullDays; i++) {
+    const d = new Date(startDate);
+    d.setDate(d.getDate() + i);
+    timeLabels.push(d);
+  }
+
+  const barHeight = 36;
+  const barGap = 6;
+  const labelWidth = 160;
+  const chartPadding = 20;
+  const headerHeight = 40;
+  const chartHeight = headerHeight + bars.length * (barHeight + barGap) + chartPadding;
+
+  return (
+    <div style={{ overflowX: 'auto', marginTop: '10px' }}>
+      <div style={{
+        position: 'relative',
+        minWidth: Math.max(600, fullDays * 80 + labelWidth + chartPadding * 2) + 'px',
+        height: chartHeight + 'px',
+        background: '#222',
+        borderRadius: '8px',
+        border: '1px solid #444',
+        padding: `0 ${chartPadding}px`
+      }}>
+        {/* Oś czasu - nagłówek */}
+        <div style={{ display: 'flex', marginLeft: labelWidth + 'px', height: headerHeight + 'px', alignItems: 'flex-end', paddingBottom: '4px', borderBottom: '1px solid #555' }}>
+          {timeLabels.map((d, i) => (
+            <div key={i} style={{
+              flex: i < fullDays ? 1 : 0,
+              fontSize: '11px',
+              color: '#aaa',
+              textAlign: 'left',
+              whiteSpace: 'nowrap'
+            }}>
+              {d.toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit' })}
+            </div>
+          ))}
+        </div>
+
+        {/* Linie siatki pionowe */}
+        {timeLabels.map((_, i) => (
+          <div key={'grid-' + i} style={{
+            position: 'absolute',
+            left: `calc(${labelWidth}px + ${(i / fullDays) * 100}% - ${(i / fullDays) * (labelWidth + chartPadding * 2)}px)`,
+            top: headerHeight + 'px',
+            bottom: '0',
+            width: '1px',
+            background: i === 0 ? 'transparent' : '#333',
+            pointerEvents: 'none'
+          }} />
+        ))}
+
+        {/* Paski operacji */}
+        {bars.map((bar, i) => {
+          const leftPercent = (bar.startOffsetDays / totalDays) * 100;
+          const widthPercent = Math.max((bar.durationDays / totalDays) * 100, 1);
+          const top = headerHeight + i * (barHeight + barGap) + barGap;
+
+          const barStart = new Date(bar.startTime);
+          const barEnd = new Date(bar.endTime);
+          const tooltip = `${bar.name}\n${barStart.toLocaleString('pl-PL')} — ${barEnd.toLocaleString('pl-PL')}\nPracownicy: ${bar.workerCount}${bar.resources ? '\nZasoby: ' + bar.resources : ''}`;
+
+          return (
+            <div key={bar.operationId} style={{ position: 'absolute', top: top + 'px', left: '0', right: '0', height: barHeight + 'px', display: 'flex', alignItems: 'center' }}>
+              {/* Etykieta */}
+              <div style={{
+                width: labelWidth + 'px',
+                paddingRight: '10px',
+                fontSize: '13px',
+                color: '#ddd',
+                textAlign: 'right',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                flexShrink: 0
+              }}>
+                {bar.name}
+              </div>
+
+              {/* Obszar wykresu */}
+              <div style={{ position: 'relative', flex: 1, height: '100%' }}>
+                <div title={tooltip} style={{
+                  position: 'absolute',
+                  left: leftPercent + '%',
+                  width: widthPercent + '%',
+                  height: '100%',
+                  background: bar.color,
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '11px',
+                  color: '#000',
+                  fontWeight: 'bold',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  padding: '0 6px',
+                  cursor: 'default',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+                  transition: 'opacity 0.2s'
+                }}>
+                  {widthPercent > 8 ? `${Math.round(bar.durationDays * 10) / 10}d` : ''}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [operations, setOperations] = useState([]);
+  const [ganttData, setGanttData] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
     startTime: '',
@@ -27,8 +153,22 @@ function App() {
     }
   };
 
-  useEffect(() => {
+  const fetchGantt = async () => {
+    try {
+      const res = await axios.get('/api/operations/gantt');
+      setGanttData(res.data);
+    } catch (err) {
+      console.error("Błąd pobierania wykresu Gantta:", err);
+    }
+  };
+
+  const refreshAll = () => {
     fetchOperations();
+    fetchGantt();
+  };
+
+  useEffect(() => {
+    refreshAll();
   }, []);
 
   const handleSubmit = async (e) => {
@@ -41,7 +181,7 @@ function App() {
         name: '', startTime: '', endTime: '', workerCount: 1, resources: '',
         totalCost: 0, crashingCostPerDay: 0, maxCrashingDays: 0
       });
-      fetchOperations();
+      refreshAll();
     } catch (err) {
       const msg = err.response?.data || "Błąd zapisu — upewnij się, że backend działa.";
       setError(typeof msg === 'string' ? msg : JSON.stringify(msg));
@@ -52,7 +192,7 @@ function App() {
     if (!confirm("Czy na pewno chcesz usunąć tę operację?")) return;
     try {
       await axios.delete(`/api/operations/${id}`);
-      fetchOperations();
+      refreshAll();
     } catch (err) {
       setError("Błąd usuwania operacji.");
     }
@@ -62,41 +202,29 @@ function App() {
     if (!confirm("Czy na pewno chcesz usunąć WSZYSTKIE operacje?")) return;
     try {
       await axios.delete('/api/operations');
-      fetchOperations();
+      refreshAll();
     } catch (err) {
       setError("Błąd usuwania operacji.");
     }
   };
 
-  const handleExport = async () => {
-    try {
-      const res = await axios.get('/api/operations/export');
-      const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `harmonogram_${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      setError("Błąd eksportu danych.");
-    }
+  const handleExport = () => {
+    window.location.href = '/api/operations/export';
   };
 
   const handleImport = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    if (!confirm(`Wczytać operacje z pliku "${file.name}"? Obecne dane zostaną zastąpione.`)) {
+      fileInputRef.current.value = '';
+      return;
+    }
 
     try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-      if (!Array.isArray(data)) {
-        setError("Plik musi zawierać tablicę operacji.");
-        return;
-      }
-      if (!confirm(`Wczytać ${data.length} operacji z pliku? Obecne dane zostaną zastąpione.`)) return;
-      await axios.post('/api/operations/import', data);
-      fetchOperations();
+      const form = new FormData();
+      form.append('file', file);
+      await axios.post('/api/operations/import', form);
+      refreshAll();
       setError('');
     } catch (err) {
       const msg = err.response?.data || "Błąd importu — sprawdź format pliku.";
@@ -204,6 +332,9 @@ function App() {
           )}
         </tbody>
       </table>
+
+      <h2 style={{ marginTop: '40px' }}>Wykres Gantta</h2>
+      <GanttChart ganttData={ganttData} />
     </div>
   );
 }
