@@ -2,7 +2,7 @@
 
 ## Ogólny opis
 
-Ten projekt skupia się na aplikacji webowej do tworzenia i edytowania harmonogramów (wykresów Gantta).
+Projekt skupia się na aplikacji webowej do tworzenia i edytowania harmonogramów (wykresów Gantta).
 
 ## Funkcjonalności
 
@@ -28,7 +28,7 @@ tworzymy aplikację w 3 wartowej strukturze podzielonej następująco:
  - logika biznesowa
  - baza danych
 
-Aplikacja jest budowana głownie w javie z wykorzystaniem React oraz Spring. Baza danych jest zaimplementowana w CSV (SQL), aczkolwiek jesteśmy otwarci na sugestie co do wyboru bazy danych.  
+Aplikacja jest budowana głownie w javie z wykorzystaniem React oraz Spring. Baza danych jest zaimplementowana w CSV (SQL), aczkolwiek jesteśmy otwarci na sugestie co do wyboru bazy danych.
 
 ## Przyszły rozwój
 - automatyczna optymalizacja harmonogramów
