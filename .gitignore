@@ -1,0 +1,37 @@
+# --- Java / Maven ---
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# --- Node.js / React (Frontend) ---
+node_modules/
+dist/
+dist-ssr/
+*.local
+.npm
+.eslintcache
+
+# --- Baza danych (H2) ---
+
+*.mv.db
+*.trace.db
+
+# --- Edytory i Systemowe ---
+.vscode/
+.idea/
+*.swp
+*.DS_Store
+Thumbs.db
+.env
+.env.local
+
+# --- Logi ---
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
