@@ -2,6 +2,7 @@ package pl.pw.elka.scheduleapp.model;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 
@@ -10,6 +11,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -47,6 +49,20 @@ public class Operation {
     public long getDurationInHours() {
         if (startTime != null && endTime != null) {
             return Duration.between(startTime, endTime).toHours();
+        }
+        return 0;
+    }
+
+    // Czas trwania w dniach — obliczany, nie zapisywany w bazie
+    @Transient
+    public long getDurationInDays() {
+        if (startTime != null && endTime != null) {
+            long days = ChronoUnit.DAYS.between(startTime.toLocalDate(), endTime.toLocalDate());
+            // Zaokrąglamy w górę jeśli jest część dnia
+            if (endTime.toLocalTime().isAfter(startTime.toLocalTime())) {
+                days++;
+            }
+            return Math.max(days, 0);
         }
         return 0;
     }

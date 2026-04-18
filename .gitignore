@@ -17,7 +17,7 @@ dist-ssr/
 .eslintcache
 
 # --- Baza danych (H2) ---
-
+data/
 *.mv.db
 *.trace.db
 
