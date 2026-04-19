@@ -40,8 +40,8 @@ function GanttChart({ ganttData, scrollRef, onScroll }) {
         if (predIdx === undefined) return;
         const pred = bars[predIdx];
         // Strzałka: koniec paska poprzednika → początek paska bieżącego
-        const fromXPercent = ((pred.startOffsetDays + pred.durationDays) / totalDays) * 100;
-        const toXPercent = (bar.startOffsetDays / totalDays) * 100;
+        const fromXPercent = ((pred.startOffsetDays + pred.durationDays) / fullDays) * 100;
+        const toXPercent = (bar.startOffsetDays / fullDays) * 100;
         const fromY = headerHeight + predIdx * (barHeight + barGap) + barGap + barHeight / 2;
         const toY = headerHeight + i * (barHeight + barGap) + barGap + barHeight / 2;
         arrows.push({ fromXPercent, toXPercent, fromY, toY, key: `${predId}-${bar.operationId}` });
@@ -116,8 +116,8 @@ function GanttChart({ ganttData, scrollRef, onScroll }) {
 
         {/* Paski operacji */}
         {bars.map((bar, i) => {
-          const leftPercent = (bar.startOffsetDays / totalDays) * 100;
-          const widthPercent = Math.max((bar.durationDays / totalDays) * 100, 1);
+          const leftPercent = (bar.startOffsetDays / fullDays) * 100;
+          const widthPercent = Math.max((bar.durationDays / fullDays) * 100, 1);
           const top = headerHeight + i * (barHeight + barGap) + barGap;
 
           const barStart = new Date(bar.startTime);
@@ -222,14 +222,14 @@ function WorkerChart({ ganttData, title, scrollRef, onScroll }) {
 
   const stairParts = [];
   workerCounts.forEach((count, s) => {
-    const x1 = ((s * step) / totalDays) * plotWidth;
-    const x2 = (((s + 1) * step) / totalDays) * plotWidth;
+    const x1 = ((s * step) / fullDays) * plotWidth;
+    const x2 = (((s + 1) * step) / fullDays) * plotWidth;
     const y = plotHeight - (count / maxWorkers) * plotHeight;
     if (s === 0) stairParts.push(`M ${x1},${y}`);
     else stairParts.push(`V ${y}`);
     stairParts.push(`H ${x2}`);
   });
-  const lastX = ((slots * step) / totalDays) * plotWidth;
+  const lastX = ((slots * step) / fullDays) * plotWidth;
   const linePath = stairParts.join(' ');
   const areaPath = `${linePath} L ${lastX},${plotHeight} L 0,${plotHeight} Z`;
 
@@ -316,8 +316,8 @@ function WorkerChart({ ganttData, title, scrollRef, onScroll }) {
           overflow: 'visible'
         }} viewBox={`0 0 ${plotWidth} ${plotHeight}`} preserveAspectRatio="none">
           {workerCounts.map((count, s) => {
-            const x = ((s * step) / totalDays) * plotWidth;
-            const w = Math.max((step / totalDays) * plotWidth - 1, 1);
+            const x = ((s * step) / fullDays) * plotWidth;
+            const w = Math.max((step / fullDays) * plotWidth - 1, 1);
             const barH = (count / maxWorkers) * plotHeight;
             return (
               <rect key={s}
@@ -360,6 +360,7 @@ function App() {
   });
   const [error, setError] = useState('');
   const fileInputRef = useRef(null);
+  const mergeFileInputRef = useRef(null);
   const [selectedPredecessors, setSelectedPredecessors] = useState([]);
   const ganttEarlyRef = useRef(null);
   const workerEarlyRef = useRef(null);
@@ -514,6 +515,22 @@ function App() {
     fileInputRef.current.value = '';
   };
 
+  const handleMerge = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      await axios.post('/api/operations/import-merge', form);
+      refreshAll();
+      setError('');
+    } catch (err) {
+      const msg = err.response?.data || 'Błąd scalania — sprawdź format pliku.';
+      setError(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+    mergeFileInputRef.current.value = '';
+  };
+
   const btnStyle = { padding: '8px 16px', cursor: 'pointer', border: 'none', fontWeight: 'bold', borderRadius: '4px' };
 
   return (
@@ -529,7 +546,11 @@ function App() {
         <button onClick={() => fileInputRef.current.click()} style={{ ...btnStyle, background: '#ffc107', color: 'black' }}>
           Wczytaj z pliku (JSON)
         </button>
+        <button onClick={() => mergeFileInputRef.current.click()} style={{ ...btnStyle, background: '#6f42c1', color: 'white' }}>
+          Dołącz z pliku (JSON)
+        </button>
         <input ref={fileInputRef} type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} />
+        <input ref={mergeFileInputRef} type="file" accept=".json" onChange={handleMerge} style={{ display: 'none' }} />
         {operations.length > 0 && (
           <button onClick={handleDeleteAll} style={{ ...btnStyle, background: '#dc3545', color: 'white' }}>
             Usuń wszystkie

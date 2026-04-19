@@ -248,6 +248,71 @@ public class HelloController {
         }
     }
 
+    // Import scalający — dołącza operacje z pliku do istniejących (bez usuwania)
+    @PostMapping(value = "/operations/import-merge", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> importMergeOperations(@RequestParam("file") MultipartFile file) {
+        if (file.isEmpty()) {
+            return ResponseEntity.badRequest().body("Plik jest pusty.");
+        }
+
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            mapper.registerModule(new JavaTimeModule());
+            List<Operation> operations = mapper.readValue(
+                    file.getInputStream(), new TypeReference<List<Operation>>() {});
+
+            // Przypisz nowe UUID każdej importowanej operacji, zachowując tymczasowe mapowanie
+            Map<Long, String> jsonIdToUuid = new HashMap<>();
+            Map<String, String> oldUuidToNew = new HashMap<>();
+            for (Operation op : operations) {
+                String newUuid = UUID.randomUUID().toString();
+                if (op.getId() != null) {
+                    jsonIdToUuid.put(op.getId(), newUuid);
+                }
+                if (op.getUuid() != null && !op.getUuid().isBlank()) {
+                    oldUuidToNew.put(op.getUuid(), newUuid);
+                }
+                op.setUuid(newUuid);
+            }
+
+            // Sortuj wg ID z JSON dla mapowania porządkowego
+            List<Operation> sortedByJsonId = new ArrayList<>(operations);
+            sortedByJsonId.sort(Comparator.comparing(op -> op.getId() != null ? op.getId() : Long.MAX_VALUE));
+            Map<Long, String> ordinalToUuid = new HashMap<>();
+            for (int i = 0; i < sortedByJsonId.size(); i++) {
+                ordinalToUuid.put((long) (i + 1), sortedByJsonId.get(i).getUuid());
+            }
+
+            // Konwertuj predecessorIds — liczby → nowe UUID, stare UUID → nowe UUID
+            for (Operation op : operations) {
+                List<String> preds = parsePredecessorValues(op.getPredecessorIds());
+                if (preds.isEmpty()) continue;
+                List<String> converted = new ArrayList<>();
+                for (String val : preds) {
+                    if (isUuidFormat(val)) {
+                        // Stary UUID z pliku → nowy UUID
+                        converted.add(oldUuidToNew.getOrDefault(val, val));
+                    } else if (val.matches("\\d+")) {
+                        long pid = Long.parseLong(val);
+                        String uuid = jsonIdToUuid.containsKey(pid)
+                                ? jsonIdToUuid.get(pid)
+                                : ordinalToUuid.get(pid);
+                        if (uuid != null) converted.add(uuid);
+                    }
+                }
+                op.setPredecessorIds(converted.isEmpty() ? null : String.join(",", converted));
+            }
+
+            for (Operation op : operations) {
+                op.setId(null);
+            }
+            List<Operation> saved = operationRepository.saveAll(operations);
+            return ResponseEntity.ok(saved);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body("Błąd parsowania pliku: " + e.getMessage());
+        }
+    }
+
     // ======================== POMOCNICY UUID ========================
 
     /** Parsuje predecessorIds na listę wartości (UUID lub int) */
