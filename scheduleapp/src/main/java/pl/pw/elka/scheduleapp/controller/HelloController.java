@@ -3,13 +3,14 @@ package pl.pw.elka.scheduleapp.controller;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ContentDisposition;
@@ -86,10 +87,24 @@ public class HelloController {
 
     @DeleteMapping("/operations/{id}")
     public ResponseEntity<?> deleteOperation(@PathVariable Long id) {
-        if (!operationRepository.existsById(id)) {
+        Optional<Operation> toDelete = operationRepository.findById(id);
+        if (toDelete.isEmpty()) {
             return ResponseEntity.badRequest().body("Operacja o ID " + id + " nie istnieje.");
         }
+        String deletedUuid = toDelete.get().getUuid();
         operationRepository.deleteById(id);
+
+        // Kaskadowe usunięcie UUID z listy poprzedników innych operacji
+        if (deletedUuid != null) {
+            List<Operation> remaining = operationRepository.findAll();
+            for (Operation op : remaining) {
+                List<String> preds = parsePredecessorValues(op.getPredecessorIds());
+                if (preds.remove(deletedUuid)) {
+                    op.setPredecessorIds(preds.isEmpty() ? null : String.join(",", preds));
+                    operationRepository.save(op);
+                }
+            }
+        }
         return ResponseEntity.ok("Usunięto operację o ID " + id);
     }
 
@@ -132,6 +147,48 @@ public class HelloController {
             List<Operation> operations = mapper.readValue(
                     file.getInputStream(), new TypeReference<List<Operation>>() {});
 
+            // 1. Przypisz UUID operacjom, które go nie mają
+            //    Zbuduj mapy: jsonId → uuid  i  numer porządkowy → uuid
+            Map<Long, String> jsonIdToUuid = new HashMap<>();
+            for (Operation op : operations) {
+                if (op.getUuid() == null || op.getUuid().isBlank()) {
+                    op.setUuid(UUID.randomUUID().toString());
+                }
+                if (op.getId() != null) {
+                    jsonIdToUuid.put(op.getId(), op.getUuid());
+                }
+            }
+
+            // Sortuj wg ID z JSON dla mapowania porządkowego
+            List<Operation> sortedByJsonId = new ArrayList<>(operations);
+            sortedByJsonId.sort(Comparator.comparing(op -> op.getId() != null ? op.getId() : Long.MAX_VALUE));
+            Map<Long, String> ordinalToUuid = new HashMap<>();
+            for (int i = 0; i < sortedByJsonId.size(); i++) {
+                ordinalToUuid.put((long) (i + 1), sortedByJsonId.get(i).getUuid());
+            }
+
+            // 2. Konwertuj predecessorIds z liczb całkowitych na UUID
+            for (Operation op : operations) {
+                List<String> preds = parsePredecessorValues(op.getPredecessorIds());
+                boolean hasIntegerPreds = preds.stream().anyMatch(s -> s.matches("\\d+"));
+                if (hasIntegerPreds) {
+                    List<String> converted = new ArrayList<>();
+                    for (String val : preds) {
+                        if (isUuidFormat(val)) {
+                            converted.add(val);
+                        } else if (val.matches("\\d+")) {
+                            long pid = Long.parseLong(val);
+                            // Szukaj najpierw w jsonId, potem w numerach porządkowych
+                            String uuid = jsonIdToUuid.containsKey(pid)
+                                    ? jsonIdToUuid.get(pid)
+                                    : ordinalToUuid.get(pid);
+                            if (uuid != null) converted.add(uuid);
+                        }
+                    }
+                    op.setPredecessorIds(converted.isEmpty() ? null : String.join(",", converted));
+                }
+            }
+
             operationRepository.deleteAll();
             for (Operation op : operations) {
                 op.setId(null);
@@ -143,41 +200,68 @@ public class HelloController {
         }
     }
 
-    /**
-     * Rozwiązuje predecessorIds — obsługuje zarówno rzeczywiste ID z bazy,
-     * jak i numery porządkowe (1, 2, 3...) z importu JSON.
-     */
-    private List<Long> resolvePredecessorIds(String predecessorIdsStr, Map<Long, Operation> opMap, Map<Long, Long> ordinalToActualId) {
-        List<Long> resolved = new ArrayList<>();
-        if (predecessorIdsStr == null || predecessorIdsStr.isBlank()) return resolved;
-        for (String pidStr : predecessorIdsStr.split(",")) {
-            String trimmed = pidStr.trim();
-            if (trimmed.isEmpty()) continue;
-            long pid = Long.parseLong(trimmed);
-            if (opMap.containsKey(pid)) {
-                // Rzeczywiste ID z bazy
-                resolved.add(pid);
-            } else if (ordinalToActualId.containsKey(pid)) {
-                // Numer porządkowy z importu → mapuj na rzeczywiste ID
-                resolved.add(ordinalToActualId.get(pid));
-            }
+    // ======================== POMOCNICY UUID ========================
+
+    /** Parsuje predecessorIds na listę wartości (UUID lub int) */
+    private List<String> parsePredecessorValues(String predecessorIdsStr) {
+        List<String> result = new ArrayList<>();
+        if (predecessorIdsStr == null || predecessorIdsStr.isBlank()) return result;
+        for (String s : predecessorIdsStr.split(",")) {
+            String trimmed = s.trim();
+            if (!trimmed.isEmpty()) result.add(trimmed);
         }
-        return resolved;
+        return result;
+    }
+
+    /** Sprawdza czy string wygląda jak UUID */
+    private boolean isUuidFormat(String s) {
+        return s.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
     }
 
     /**
-     * Tworzy mapę: numer porządkowy (1, 2, 3...) → rzeczywiste ID operacji.
-     * Operacje sortowane po ID (auto-increment zachowuje kolejność importu).
+     * Rozwiązuje predecessorIds na listę operacji poprzedzających.
+     * Obsługuje: UUID (nowy format), DB ID (zgodny), numery porządkowe (stary format).
      */
-    private Map<Long, Long> buildOrdinalMapping(List<Operation> operations) {
+    private List<Operation> resolvePredecessorOps(
+            String predecessorIdsStr,
+            Map<String, Operation> uuidToOp,
+            Map<Long, Operation> dbIdToOp,
+            Map<Long, Operation> ordinalToOp) {
+        List<Operation> result = new ArrayList<>();
+        for (String val : parsePredecessorValues(predecessorIdsStr)) {
+            Operation found = null;
+            if (isUuidFormat(val)) {
+                found = uuidToOp.get(val);
+            } else if (val.matches("\\d+")) {
+                long num = Long.parseLong(val);
+                found = dbIdToOp.containsKey(num) ? dbIdToOp.get(num) : ordinalToOp.get(num);
+            }
+            if (found != null && !result.contains(found)) result.add(found);
+        }
+        return result;
+    }
+
+    /** Buduje mapę uuid → operacja */
+    private Map<String, Operation> buildUuidMap(List<Operation> operations) {
+        Map<String, Operation> map = new HashMap<>();
+        for (Operation op : operations) {
+            if (op.getUuid() != null) map.put(op.getUuid(), op);
+        }
+        return map;
+    }
+
+    /** Buduje mapę numer porządkowy (1,2,3...) → operacja, sortując wg ID */
+    private Map<Long, Operation> buildOrdinalMap(List<Operation> operations) {
         List<Operation> sorted = new ArrayList<>(operations);
         sorted.sort(Comparator.comparing(Operation::getId));
-        Map<Long, Long> ordinalToActualId = new HashMap<>();
+        Map<Long, Operation> map = new HashMap<>();
         for (int i = 0; i < sorted.size(); i++) {
-            ordinalToActualId.put((long) (i + 1), sorted.get(i).getId());
+            map.put((long) (i + 1), sorted.get(i));
         }
-        return ordinalToActualId;
+        return map;
     }
+
+    // ======================== GANTT ENDPOINTS ========================
 
     // Wykres Gantta — backend oblicza pozycje i kolory pasków
     @GetMapping("/operations/gantt")
@@ -191,29 +275,23 @@ public class HelloController {
         operations.sort(Comparator.comparing(Operation::getStartTime,
                 Comparator.nullsLast(Comparator.naturalOrder())));
 
-        // Mapa ID -> operacja i mapowanie porządkowe
-        Map<Long, Operation> opMap = new HashMap<>();
-        for (Operation op : operations) opMap.put(op.getId(), op);
-        Map<Long, Long> ordinalToActualId = buildOrdinalMapping(operations);
+        // Mapy do rozwiązywania poprzedników
+        Map<String, Operation> uuidToOp = buildUuidMap(operations);
+        Map<Long, Operation> dbIdToOp = new HashMap<>();
+        for (Operation op : operations) dbIdToOp.put(op.getId(), op);
+        Map<Long, Operation> ordinalToOp = buildOrdinalMap(operations);
 
         // Oblicz granice projektu
         LocalDateTime projectStart = operations.stream()
-                .map(Operation::getStartTime)
-                .filter(t -> t != null)
-                .min(Comparator.naturalOrder())
-                .orElse(LocalDateTime.now());
-
+                .map(Operation::getStartTime).filter(t -> t != null)
+                .min(Comparator.naturalOrder()).orElse(LocalDateTime.now());
         LocalDateTime projectEnd = operations.stream()
-                .map(Operation::getEndTime)
-                .filter(t -> t != null)
-                .max(Comparator.naturalOrder())
-                .orElse(projectStart.plusDays(1));
+                .map(Operation::getEndTime).filter(t -> t != null)
+                .max(Comparator.naturalOrder()).orElse(projectStart.plusDays(1));
 
         double totalHours = Duration.between(projectStart, projectEnd).toMinutes() / 60.0;
-        double totalDays = totalHours / 24.0;
-        if (totalDays < 0.01) totalDays = 1;
+        double totalDays = Math.max(totalHours / 24.0, 0.01);
 
-        // Paleta kolorów
         String[] colors = {
             "#4FC3F7", "#81C784", "#FFB74D", "#E57373",
             "#BA68C8", "#4DD0E1", "#FFD54F", "#F06292",
@@ -238,13 +316,17 @@ public class HelloController {
             bar.setWorkerCount(op.getWorkerCount() != null ? op.getWorkerCount() : 0);
             bar.setResources(op.getResources());
             bar.setColor(colors[i % colors.length]);
-            bar.setPredecessorIds(resolvePredecessorIds(op.getPredecessorIds(), opMap, ordinalToActualId));
+
+            List<Long> predDbIds = new ArrayList<>();
+            for (Operation pred : resolvePredecessorOps(op.getPredecessorIds(), uuidToOp, dbIdToOp, ordinalToOp)) {
+                predDbIds.add(pred.getId());
+            }
+            bar.setPredecessorIds(predDbIds);
 
             bars.add(bar);
         }
 
-        GanttChartDTO chart = new GanttChartDTO(projectStart, projectEnd, totalDays, bars);
-        return ResponseEntity.ok(chart);
+        return ResponseEntity.ok(new GanttChartDTO(projectStart, projectEnd, totalDays, bars));
     }
 
     // Wykres Gantta — najpóźniejsze terminy rozpoczęcia (backward pass CPM)
@@ -255,60 +337,51 @@ public class HelloController {
             return ResponseEntity.ok(new GanttChartDTO(null, null, 0, List.of()));
         }
 
-        // Mapa ID -> operacja i mapowanie porządkowe
-        Map<Long, Operation> opMap = new HashMap<>();
-        for (Operation op : operations) {
-            opMap.put(op.getId(), op);
-        }
-        Map<Long, Long> ordinalToActualId = buildOrdinalMapping(operations);
+        // Mapy do rozwiązywania poprzedników
+        Map<String, Operation> uuidToOp = buildUuidMap(operations);
+        Map<Long, Operation> dbIdToOp = new HashMap<>();
+        for (Operation op : operations) dbIdToOp.put(op.getId(), op);
+        Map<Long, Operation> ordinalToOp = buildOrdinalMap(operations);
 
-        // Oblicz granice projektu (z najwcześniejszych terminów)
+        // Oblicz granice projektu
         LocalDateTime projectStart = operations.stream()
-                .map(Operation::getStartTime)
-                .filter(t -> t != null)
-                .min(Comparator.naturalOrder())
-                .orElse(LocalDateTime.now());
-
+                .map(Operation::getStartTime).filter(t -> t != null)
+                .min(Comparator.naturalOrder()).orElse(LocalDateTime.now());
         LocalDateTime projectEnd = operations.stream()
-                .map(Operation::getEndTime)
-                .filter(t -> t != null)
-                .max(Comparator.naturalOrder())
-                .orElse(projectStart.plusDays(1));
+                .map(Operation::getEndTime).filter(t -> t != null)
+                .max(Comparator.naturalOrder()).orElse(projectStart.plusDays(1));
 
-        // Zbuduj graf następników (odwrotność predecessorIds) z rozwiązanymi ID
-        Map<Long, Set<Long>> successors = new HashMap<>();
+        // Zbuduj graf następników po UUID
+        Map<String, Set<String>> successors = new HashMap<>();
         for (Operation op : operations) {
-            successors.put(op.getId(), new HashSet<>());
+            if (op.getUuid() != null) successors.put(op.getUuid(), new HashSet<>());
         }
         for (Operation op : operations) {
-            List<Long> resolvedPreds = resolvePredecessorIds(op.getPredecessorIds(), opMap, ordinalToActualId);
-            for (Long predId : resolvedPreds) {
-                successors.get(predId).add(op.getId());
+            for (Operation pred : resolvePredecessorOps(op.getPredecessorIds(), uuidToOp, dbIdToOp, ordinalToOp)) {
+                if (pred.getUuid() != null && op.getUuid() != null) {
+                    successors.get(pred.getUuid()).add(op.getUuid());
+                }
             }
         }
 
-        // Backward pass: oblicz najpóźniejsze czasy zakończenia (LF) i rozpoczęcia (LS)
-        // LF(i) = min{ LS(j) : j jest następnikiem i }, lub projectEnd jeśli brak następników
-        // LS(i) = LF(i) - duration(i)
-        Map<Long, LocalDateTime> lateFinish = new HashMap<>();
-        Map<Long, LocalDateTime> lateStart = new HashMap<>();
-
-        // Przetwarzamy operacje w odwrotnej kolejności topologicznej (rekurencja z memoizacją)
-        Set<Long> computed = new HashSet<>();
+        // Backward pass — oblicz LF i LS po UUID
+        Map<String, LocalDateTime> lateFinish = new HashMap<>();
+        Map<String, LocalDateTime> lateStart = new HashMap<>();
+        Set<String> computed = new HashSet<>();
         for (Operation op : operations) {
-            computeLateFinish(op.getId(), opMap, successors, lateFinish, lateStart, computed, projectEnd);
+            if (op.getUuid() != null) {
+                computeLateFinishByUuid(op.getUuid(), uuidToOp, successors, lateFinish, lateStart, computed, projectEnd);
+            }
         }
 
-        // Teraz budujemy paski Gantta z nowymi czasami
         double totalHours = Duration.between(projectStart, projectEnd).toMinutes() / 60.0;
-        double totalDays = totalHours / 24.0;
-        if (totalDays < 0.01) totalDays = 1;
+        double totalDays = Math.max(totalHours / 24.0, 0.01);
 
-        // Sortujemy operacje po ich nowym LS (od najwcześniejszego)
+        // Sortuj po LS
         List<Operation> sortedOps = new ArrayList<>(operations);
-        sortedOps.sort(Comparator.comparing(op -> lateStart.getOrDefault(op.getId(), projectEnd)));
+        sortedOps.sort(Comparator.comparing(op ->
+            op.getUuid() != null ? lateStart.getOrDefault(op.getUuid(), projectEnd) : projectEnd));
 
-        // Paleta kolorów
         String[] colors = {
             "#4FC3F7", "#81C784", "#FFB74D", "#E57373",
             "#BA68C8", "#4DD0E1", "#FFD54F", "#F06292",
@@ -318,10 +391,10 @@ public class HelloController {
         List<GanttBarDTO> bars = new ArrayList<>();
         for (int i = 0; i < sortedOps.size(); i++) {
             Operation op = sortedOps.get(i);
-            if (op.getStartTime() == null || op.getEndTime() == null) continue;
+            if (op.getStartTime() == null || op.getEndTime() == null || op.getUuid() == null) continue;
 
-            LocalDateTime ls = lateStart.get(op.getId());
-            LocalDateTime lf = lateFinish.get(op.getId());
+            LocalDateTime ls = lateStart.get(op.getUuid());
+            LocalDateTime lf = lateFinish.get(op.getUuid());
             if (ls == null || lf == null) continue;
 
             double startOffsetHours = Duration.between(projectStart, ls).toMinutes() / 60.0;
@@ -337,58 +410,56 @@ public class HelloController {
             bar.setWorkerCount(op.getWorkerCount() != null ? op.getWorkerCount() : 0);
             bar.setResources(op.getResources());
             bar.setColor(colors[i % colors.length]);
-            bar.setPredecessorIds(resolvePredecessorIds(op.getPredecessorIds(), opMap, ordinalToActualId));
+
+            List<Long> predDbIds = new ArrayList<>();
+            for (Operation pred : resolvePredecessorOps(op.getPredecessorIds(), uuidToOp, dbIdToOp, ordinalToOp)) {
+                predDbIds.add(pred.getId());
+            }
+            bar.setPredecessorIds(predDbIds);
 
             bars.add(bar);
         }
 
-        GanttChartDTO chart = new GanttChartDTO(projectStart, projectEnd, totalDays, bars);
-        return ResponseEntity.ok(chart);
+        return ResponseEntity.ok(new GanttChartDTO(projectStart, projectEnd, totalDays, bars));
     }
 
     /**
-     * Rekurencyjne obliczanie LF i LS operacji (backward pass).
+     * Backward pass CPM — rekurencyjne obliczanie LF i LS po UUID.
+     * LF(i) = min{ LS(j) } dla następników j, lub projectEnd jeśli brak następników.
      */
-    private void computeLateFinish(Long opId,
-                                    Map<Long, Operation> opMap,
-                                    Map<Long, Set<Long>> successors,
-                                    Map<Long, LocalDateTime> lateFinish,
-                                    Map<Long, LocalDateTime> lateStart,
-                                    Set<Long> computed,
-                                    LocalDateTime projectEnd) {
-        if (computed.contains(opId)) return;
+    private void computeLateFinishByUuid(
+            String uuid,
+            Map<String, Operation> uuidToOp,
+            Map<String, Set<String>> successors,
+            Map<String, LocalDateTime> lateFinish,
+            Map<String, LocalDateTime> lateStart,
+            Set<String> computed,
+            LocalDateTime projectEnd) {
+        if (computed.contains(uuid)) return;
 
-        Operation op = opMap.get(opId);
+        Operation op = uuidToOp.get(uuid);
         if (op == null || op.getStartTime() == null || op.getEndTime() == null) {
-            computed.add(opId);
+            computed.add(uuid);
             return;
         }
 
-        // Czas trwania operacji (zachowujemy oryginalny)
         Duration duration = Duration.between(op.getStartTime(), op.getEndTime());
-
-        Set<Long> succs = successors.getOrDefault(opId, Set.of());
+        Set<String> succs = successors.getOrDefault(uuid, Set.of());
 
         if (succs.isEmpty()) {
-            // Brak następników — LF = koniec projektu
-            lateFinish.put(opId, projectEnd);
+            lateFinish.put(uuid, projectEnd);
         } else {
-            // Najpierw oblicz LS wszystkich następników
-            for (Long succId : succs) {
-                computeLateFinish(succId, opMap, successors, lateFinish, lateStart, computed, projectEnd);
+            for (String succUuid : succs) {
+                computeLateFinishByUuid(succUuid, uuidToOp, successors, lateFinish, lateStart, computed, projectEnd);
             }
-            // LF(i) = min{ LS(j) } dla następników j
             LocalDateTime minSuccStart = succs.stream()
-                    .map(lateStart::get)
-                    .filter(t -> t != null)
-                    .min(Comparator.naturalOrder())
-                    .orElse(projectEnd);
-            lateFinish.put(opId, minSuccStart);
+                    .map(lateStart::get).filter(t -> t != null)
+                    .min(Comparator.naturalOrder()).orElse(projectEnd);
+            lateFinish.put(uuid, minSuccStart);
         }
 
-        // LS(i) = LF(i) - duration
-        lateStart.put(opId, lateFinish.get(opId).minus(duration));
-        computed.add(opId);
+        lateStart.put(uuid, lateFinish.get(uuid).minus(duration));
+        computed.add(uuid);
     }
 
     @GetMapping("/hello")

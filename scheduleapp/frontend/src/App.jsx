@@ -524,12 +524,12 @@ function App() {
                 <label key={op.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '3px 0', cursor: 'pointer', fontSize: '14px' }}>
                   <input
                     type="checkbox"
-                    checked={selectedPredecessors.includes(op.id)}
+                    checked={selectedPredecessors.includes(op.uuid)}
                     onChange={e => {
                       if (e.target.checked) {
-                        setSelectedPredecessors([...selectedPredecessors, op.id]);
+                        setSelectedPredecessors([...selectedPredecessors, op.uuid]);
                       } else {
-                        setSelectedPredecessors(selectedPredecessors.filter(id => id !== op.id));
+                        setSelectedPredecessors(selectedPredecessors.filter(uid => uid !== op.uuid));
                       }
                     }}
                   />
@@ -575,9 +575,9 @@ function App() {
               <td style={{ color: '#ff6b6b' }}>{op.crashingCostPerDay != null ? op.crashingCostPerDay.toLocaleString() + ' PLN' : '0 PLN'}</td>
               <td style={{ color: '#4da3ff' }}>{op.maxCrashingDays != null ? op.maxCrashingDays + ' dni' : '0 dni'}</td>
               <td style={{ color: '#ff9800', fontSize: '12px' }}>
-                {op.predecessorIds ? op.predecessorIds.split(',').map(pid => {
-                  const pred = operations.find(o => o.id === parseInt(pid.trim()));
-                  return pred ? pred.name : pid.trim();
+                {op.predecessorIds ? op.predecessorIds.split(',').map(uid => {
+                  const pred = operations.find(o => o.uuid === uid.trim());
+                  return pred ? pred.name : uid.trim().substring(0, 8) + '...';
                 }).join(', ') : '-'}
               </td>
               <td>
