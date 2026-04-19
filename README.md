@@ -6,12 +6,12 @@ Projekt skupia się na aplikacji webowej do tworzenia i edytowania harmonogramó
 
 ## Funkcjonalności
 
-- wygodne przeglądanie harmongramów
+- wygodne przeglądanie harmonogramów
 - prosta edycja harmonogramów
 - łatwy import i export danych
 - tworzenie operacji i możliwość nadawania im atrybutów
 - tworzenie wykresów wymagań i zasobów
-- automatyczne podliczenie kosztów finasowych i czasowych
+- automatyczne podliczenie kosztów finansowych i czasowych
 
 ## Instalacja
 
@@ -23,7 +23,7 @@ git clone https://gitlab-stud.elka.pw.edu.pl/mwrobel3/PAP_26L_Projekt_harmonogra
 
 ## Aspekty techniczne projektu
 
-tworzymy aplikację w 3 wartowej strukturze podzielonej następująco:
+tworzymy aplikację w 3 warstowej strukturze podzielonej następująco:
  - logika interfejsu użytkownika
  - logika biznesowa
  - baza danych
