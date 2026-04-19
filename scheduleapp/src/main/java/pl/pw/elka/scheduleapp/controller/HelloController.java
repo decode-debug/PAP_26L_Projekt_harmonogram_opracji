@@ -5,7 +5,9 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -204,6 +206,162 @@ public class HelloController {
                         .map(Long::parseLong)
                         .collect(Collectors.toList());
             }
+            bar.setPredecessorIds(predIds);
+
+            bars.add(bar);
+        }
+
+        GanttChartDTO chart = new GanttChartDTO(projectStart, projectEnd, totalDays, bars);
+        return ResponseEntity.ok(chart);
+    }
+
+    // Wykres Gantta — najpóźniejsze terminy rozpoczęcia (Late Start)
+    @GetMapping("/operations/gantt-late")
+    public ResponseEntity<?> getGanttChartLateStart() {
+        List<Operation> operations = operationRepository.findAll();
+        if (operations.isEmpty()) {
+            return ResponseEntity.ok(new GanttChartDTO(null, null, 0, List.of()));
+        }
+
+        // Mapa operacji po ID
+        Map<Long, Operation> opMap = new HashMap<>();
+        for (Operation op : operations) {
+            opMap.put(op.getId(), op);
+        }
+
+        // Parsuj predecessorIds dla każdej operacji
+        Map<Long, List<Long>> predecessors = new HashMap<>();
+        Map<Long, List<Long>> successors = new HashMap<>();
+        for (Operation op : operations) {
+            predecessors.put(op.getId(), new ArrayList<>());
+            successors.put(op.getId(), new ArrayList<>());
+        }
+        for (Operation op : operations) {
+            if (op.getPredecessorIds() != null && !op.getPredecessorIds().isBlank()) {
+                List<Long> predIds = Arrays.stream(op.getPredecessorIds().split(","))
+                        .map(String::trim).filter(s -> !s.isEmpty())
+                        .map(Long::parseLong).collect(Collectors.toList());
+                predecessors.put(op.getId(), predIds);
+                for (Long predId : predIds) {
+                    if (successors.containsKey(predId)) {
+                        successors.get(predId).add(op.getId());
+                    }
+                }
+            }
+        }
+
+        // Oblicz czas trwania każdej operacji w minutach
+        Map<Long, Long> durationMinutes = new HashMap<>();
+        for (Operation op : operations) {
+            if (op.getStartTime() != null && op.getEndTime() != null) {
+                durationMinutes.put(op.getId(), Duration.between(op.getStartTime(), op.getEndTime()).toMinutes());
+            } else {
+                durationMinutes.put(op.getId(), 0L);
+            }
+        }
+
+        // Oblicz projectEnd = najdalszy endTime (oryginalny harmonogram)
+        LocalDateTime projectEnd = operations.stream()
+                .map(Operation::getEndTime).filter(t -> t != null)
+                .max(Comparator.naturalOrder()).orElse(LocalDateTime.now());
+
+        LocalDateTime projectStart = operations.stream()
+                .map(Operation::getStartTime).filter(t -> t != null)
+                .min(Comparator.naturalOrder()).orElse(projectEnd.minusDays(1));
+
+        // Late Finish i Late Start — liczone od końca
+        Map<Long, LocalDateTime> lateFinish = new HashMap<>();
+        Map<Long, LocalDateTime> lateStart = new HashMap<>();
+
+        // Algorytm wsteczny: przetwarzamy operacje w odwrotnej kolejności topologicznej
+        // Krok 1: operacje bez następników -> lateFinish = projectEnd
+        // Krok 2: cofamy się po grafie zależności
+        boolean[] visited = new boolean[0]; // Nie używamy tablicy, lecz mapy
+        Map<Long, Boolean> computed = new HashMap<>();
+        for (Operation op : operations) {
+            computed.put(op.getId(), false);
+        }
+
+        // Rekurencyjna funkcja obliczania late finish/start (iteracyjnie przez stos)
+        // Zamiast rekurencji, iterujemy aż wszystko obliczone
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            for (Operation op : operations) {
+                if (computed.get(op.getId())) continue;
+
+                List<Long> succs = successors.get(op.getId());
+                if (succs.isEmpty()) {
+                    // Brak następników -> lateFinish = projectEnd
+                    lateFinish.put(op.getId(), projectEnd);
+                    lateStart.put(op.getId(), projectEnd.minusMinutes(durationMinutes.get(op.getId())));
+                    computed.put(op.getId(), true);
+                    changed = true;
+                } else {
+                    // Sprawdź czy wszyscy następnicy obliczeni
+                    boolean allSuccsComputed = true;
+                    for (Long succId : succs) {
+                        if (!computed.getOrDefault(succId, false)) {
+                            allSuccsComputed = false;
+                            break;
+                        }
+                    }
+                    if (allSuccsComputed) {
+                        // lateFinish = min(lateStart następników)
+                        LocalDateTime minLateStartOfSuccs = succs.stream()
+                                .map(lateStart::get)
+                                .min(Comparator.naturalOrder())
+                                .orElse(projectEnd);
+                        lateFinish.put(op.getId(), minLateStartOfSuccs);
+                        lateStart.put(op.getId(), minLateStartOfSuccs.minusMinutes(durationMinutes.get(op.getId())));
+                        computed.put(op.getId(), true);
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        // Nowy projectStart = najwcześniejszy lateStart (powinien == oryginalny projectStart)
+        // Ale zostawiamy oryginalny projectStart, żeby wykresy były porównywalne
+
+        double totalHours = Duration.between(projectStart, projectEnd).toMinutes() / 60.0;
+        double totalDays = totalHours / 24.0;
+        if (totalDays < 0.01) totalDays = 1;
+
+        // Paleta kolorów
+        String[] colors = {
+            "#4FC3F7", "#81C784", "#FFB74D", "#E57373",
+            "#BA68C8", "#4DD0E1", "#FFD54F", "#F06292",
+            "#AED581", "#7986CB", "#FF8A65", "#A1887F"
+        };
+
+        // Sortuj po lateStart
+        List<Operation> sorted = new ArrayList<>(operations);
+        sorted.sort(Comparator.comparing(op -> lateStart.getOrDefault(op.getId(), projectEnd)));
+
+        List<GanttBarDTO> bars = new ArrayList<>();
+        for (int i = 0; i < sorted.size(); i++) {
+            Operation op = sorted.get(i);
+            if (!computed.get(op.getId())) continue;
+
+            LocalDateTime ls = lateStart.get(op.getId());
+            LocalDateTime lf = lateFinish.get(op.getId());
+
+            double startOffsetHours = Duration.between(projectStart, ls).toMinutes() / 60.0;
+            double durationHours = durationMinutes.get(op.getId()) / 60.0;
+
+            GanttBarDTO bar = new GanttBarDTO();
+            bar.setOperationId(op.getId());
+            bar.setName(op.getName());
+            bar.setStartTime(ls);
+            bar.setEndTime(lf);
+            bar.setStartOffsetDays(startOffsetHours / 24.0);
+            bar.setDurationDays(durationHours / 24.0);
+            bar.setWorkerCount(op.getWorkerCount() != null ? op.getWorkerCount() : 0);
+            bar.setResources(op.getResources());
+            bar.setColor(colors[i % colors.length]);
+
+            List<Long> predIds = predecessors.get(op.getId());
             bar.setPredecessorIds(predIds);
 
             bars.add(bar);

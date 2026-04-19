@@ -178,6 +178,7 @@ function GanttChart({ ganttData }) {
 function App() {
   const [operations, setOperations] = useState([]);
   const [ganttData, setGanttData] = useState(null);
+  const [ganttLateData, setGanttLateData] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
     startTime: '',
@@ -213,9 +214,19 @@ function App() {
     }
   };
 
+  const fetchGanttLate = async () => {
+    try {
+      const res = await axios.get('/api/operations/gantt-late');
+      setGanttLateData(res.data);
+    } catch (err) {
+      console.error("Błąd pobierania wykresu Gantta (późne starty):", err);
+    }
+  };
+
   const refreshAll = () => {
     fetchOperations();
     fetchGantt();
+    fetchGanttLate();
   };
 
   useEffect(() => {
@@ -425,6 +436,9 @@ function App() {
 
       <h2 style={{ marginTop: '40px' }}>Wykres Gantta</h2>
       <GanttChart ganttData={ganttData} />
+
+      <h2 style={{ marginTop: '40px' }}>Wykres Gantta — Najpóźniejsze terminy rozpoczęcia</h2>
+      <GanttChart ganttData={ganttLateData} />
     </div>
   );
 }
