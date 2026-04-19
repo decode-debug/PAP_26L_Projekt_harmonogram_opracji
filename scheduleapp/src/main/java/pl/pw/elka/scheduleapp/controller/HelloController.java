@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -58,28 +59,44 @@ public class HelloController {
             return ResponseEntity.badRequest().body("Nazwa operacji nie może być pusta.");
         }
 
-        // Walidacja: daty muszą być podane
-        if (operation.getStartTime() == null || operation.getEndTime() == null) {
-            return ResponseEntity.badRequest().body("Czas rozpoczęcia i zakończenia muszą być podane.");
-        }
-
-        // Walidacja: endTime musi być po startTime
-        if (!operation.getEndTime().isAfter(operation.getStartTime())) {
-            return ResponseEntity.badRequest().body("Czas zakończenia musi być późniejszy niż czas rozpoczęcia.");
+        if (Boolean.TRUE.equals(operation.getAsap())) {
+            // Tryb ASAP — wymagany czas trwania
+            if (operation.getAsapDurationHours() == null || operation.getAsapDurationHours() <= 0) {
+                return ResponseEntity.badRequest().body("Czas trwania operacji ASAP musi być większy od 0.");
+            }
+            // Wyczyść daty — zostaną obliczone dynamicznie
+            operation.setStartTime(null);
+            operation.setEndTime(null);
+            // Walidacja crashing
+            double durationDays = operation.getAsapDurationHours() / 24.0;
+            if (operation.getMaxCrashingDays() != null && operation.getMaxCrashingDays() >= durationDays) {
+                return ResponseEntity.badRequest().body(
+                    "Maksymalne skrócenie (" + operation.getMaxCrashingDays() +
+                    " dni) musi być mniejsze niż czas trwania operacji (" +
+                    String.format("%.2f", durationDays) + " dni)."
+                );
+            }
+        } else {
+            // Tryb normalny — wymagane daty
+            if (operation.getStartTime() == null || operation.getEndTime() == null) {
+                return ResponseEntity.badRequest().body("Czas rozpoczęcia i zakończenia muszą być podane.");
+            }
+            if (!operation.getEndTime().isAfter(operation.getStartTime())) {
+                return ResponseEntity.badRequest().body("Czas zakończenia musi być późniejszy niż czas rozpoczęcia.");
+            }
+            // Walidacja: maxCrashingDays < durationInDays
+            long durationDays = operation.getDurationInDays();
+            if (operation.getMaxCrashingDays() != null && operation.getMaxCrashingDays() >= durationDays) {
+                return ResponseEntity.badRequest().body(
+                    "Maksymalne skrócenie (" + operation.getMaxCrashingDays() +
+                    " dni) musi być mniejsze niż czas trwania operacji (" + durationDays + " dni)."
+                );
+            }
         }
 
         // Walidacja: workerCount >= 1
         if (operation.getWorkerCount() == null || operation.getWorkerCount() < 1) {
             return ResponseEntity.badRequest().body("Liczba pracowników musi wynosić co najmniej 1.");
-        }
-
-        // Walidacja: maxCrashingDays < durationInDays
-        long durationDays = operation.getDurationInDays();
-        if (operation.getMaxCrashingDays() != null && operation.getMaxCrashingDays() >= durationDays) {
-            return ResponseEntity.badRequest().body(
-                "Maksymalne skrócenie (" + operation.getMaxCrashingDays() +
-                " dni) musi być mniejsze niż czas trwania operacji (" + durationDays + " dni)."
-            );
         }
 
         Operation saved = operationRepository.save(operation);
@@ -294,6 +311,79 @@ public class HelloController {
 
     // ======================== GANTT ENDPOINTS ========================
 
+    /**
+     * Oblicza efektywne czasy startów i zakończeń operacji ASAP.
+     * Zwraca mapę uuid → [effectiveStart, effectiveEnd].
+     * Dla operacji bez ASAP korzysta z ich przechowywanych dat.
+     */
+    private Map<String, LocalDateTime[]> computeAsapTimes(
+            List<Operation> operations,
+            Map<String, Operation> uuidToOp,
+            Map<Long, Operation> dbIdToOp,
+            Map<Long, Operation> ordinalToOp,
+            LocalDateTime projectStart) {
+
+        Map<String, LocalDateTime[]> result = new HashMap<>();
+        Set<String> resolved = new HashSet<>();
+
+        // Zainicjuj operacje ze stałymi datami
+        for (Operation op : operations) {
+            if (!Boolean.TRUE.equals(op.getAsap()) && op.getUuid() != null
+                    && op.getStartTime() != null && op.getEffectiveEndTime() != null) {
+                result.put(op.getUuid(), new LocalDateTime[]{op.getStartTime(), op.getEffectiveEndTime()});
+                resolved.add(op.getUuid());
+            }
+        }
+
+        // Iteracyjnie rozwiązuj operacje ASAP w kolejności topologicznej
+        List<Operation> asapOps = new ArrayList<>();
+        for (Operation op : operations) {
+            if (Boolean.TRUE.equals(op.getAsap()) && op.getUuid() != null) {
+                asapOps.add(op);
+            }
+        }
+
+        boolean progress = true;
+        while (progress && !asapOps.isEmpty()) {
+            progress = false;
+            Iterator<Operation> it = asapOps.iterator();
+            while (it.hasNext()) {
+                Operation op = it.next();
+                List<Operation> preds = resolvePredecessorOps(op.getPredecessorIds(), uuidToOp, dbIdToOp, ordinalToOp);
+
+                // Sprawdź czy wszyscy poprzednicy są rozwiązani
+                boolean allResolved = true;
+                for (Operation pred : preds) {
+                    if (pred.getUuid() != null && !resolved.contains(pred.getUuid())) {
+                        allResolved = false;
+                        break;
+                    }
+                }
+
+                if (allResolved) {
+                    LocalDateTime start = projectStart;
+                    for (Operation pred : preds) {
+                        if (pred.getUuid() != null && result.containsKey(pred.getUuid())) {
+                            LocalDateTime predEnd = result.get(pred.getUuid())[1];
+                            if (predEnd != null && predEnd.isAfter(start)) {
+                                start = predEnd;
+                            }
+                        }
+                    }
+                    double durHours = op.getAsapDurationHours() != null ? op.getAsapDurationHours() : 0;
+                    long durMinutes = (long) (durHours * 60);
+                    int crashed = op.getCrashedDays() != null ? op.getCrashedDays() : 0;
+                    LocalDateTime end = start.plusMinutes(durMinutes).minusDays(crashed);
+                    result.put(op.getUuid(), new LocalDateTime[]{start, end});
+                    resolved.add(op.getUuid());
+                    it.remove();
+                    progress = true;
+                }
+            }
+        }
+        return result;
+    }
+
     // Wykres Gantta — backend oblicza pozycje i kolory pasków
     @GetMapping("/operations/gantt")
     public ResponseEntity<?> getGanttChart() {
@@ -302,7 +392,7 @@ public class HelloController {
             return ResponseEntity.ok(new GanttChartDTO(null, null, 0, List.of()));
         }
 
-        // Sortuj po startTime
+        // Sortuj po startTime (ASAP na końcu wstępnie)
         operations.sort(Comparator.comparing(Operation::getStartTime,
                 Comparator.nullsLast(Comparator.naturalOrder())));
 
@@ -312,13 +402,27 @@ public class HelloController {
         for (Operation op : operations) dbIdToOp.put(op.getId(), op);
         Map<Long, Operation> ordinalToOp = buildOrdinalMap(operations);
 
-        // Oblicz granice projektu
+        // Oblicz granice projektu (na podstawie operacji ze stałymi datami)
         LocalDateTime projectStart = operations.stream()
+                .filter(op -> !Boolean.TRUE.equals(op.getAsap()))
                 .map(Operation::getStartTime).filter(t -> t != null)
                 .min(Comparator.naturalOrder()).orElse(LocalDateTime.now());
-        LocalDateTime projectEnd = operations.stream()
-                .map(Operation::getEffectiveEndTime).filter(t -> t != null)
-                .max(Comparator.naturalOrder()).orElse(projectStart.plusDays(1));
+
+        // Oblicz czasy ASAP
+        Map<String, LocalDateTime[]> asapTimes = computeAsapTimes(operations, uuidToOp, dbIdToOp, ordinalToOp, projectStart);
+
+        // Wyznacz faktyczny koniec projektu (uwzględnia ASAP)
+        LocalDateTime projectEnd = projectStart.plusDays(1);
+        for (Operation op : operations) {
+            LocalDateTime end;
+            if (Boolean.TRUE.equals(op.getAsap()) && op.getUuid() != null) {
+                LocalDateTime[] times = asapTimes.get(op.getUuid());
+                end = times != null ? times[1] : null;
+            } else {
+                end = op.getEffectiveEndTime();
+            }
+            if (end != null && end.isAfter(projectEnd)) projectEnd = end;
+        }
 
         double totalHours = Duration.between(projectStart, projectEnd).toMinutes() / 60.0;
         double totalDays = Math.max(totalHours / 24.0, 0.01);
@@ -332,16 +436,26 @@ public class HelloController {
         List<GanttBarDTO> bars = new ArrayList<>();
         for (int i = 0; i < operations.size(); i++) {
             Operation op = operations.get(i);
-            if (op.getStartTime() == null || op.getEffectiveEndTime() == null) continue;
+            LocalDateTime startT, endT;
+            if (Boolean.TRUE.equals(op.getAsap()) && op.getUuid() != null) {
+                LocalDateTime[] times = asapTimes.get(op.getUuid());
+                if (times == null) continue;
+                startT = times[0];
+                endT = times[1];
+            } else {
+                if (op.getStartTime() == null || op.getEffectiveEndTime() == null) continue;
+                startT = op.getStartTime();
+                endT = op.getEffectiveEndTime();
+            }
 
-            double startOffsetHours = Duration.between(projectStart, op.getStartTime()).toMinutes() / 60.0;
-            double durationHours = Duration.between(op.getStartTime(), op.getEffectiveEndTime()).toMinutes() / 60.0;
+            double startOffsetHours = Duration.between(projectStart, startT).toMinutes() / 60.0;
+            double durationHours = Duration.between(startT, endT).toMinutes() / 60.0;
 
             GanttBarDTO bar = new GanttBarDTO();
             bar.setOperationId(op.getId());
             bar.setName(op.getName());
-            bar.setStartTime(op.getStartTime());
-            bar.setEndTime(op.getEffectiveEndTime());
+            bar.setStartTime(startT);
+            bar.setEndTime(endT);
             bar.setStartOffsetDays(startOffsetHours / 24.0);
             bar.setDurationDays(durationHours / 24.0);
             bar.setWorkerCount(op.getWorkerCount() != null ? op.getWorkerCount() : 0);
@@ -376,11 +490,26 @@ public class HelloController {
 
         // Oblicz granice projektu (gantt-late)
         LocalDateTime projectStart = operations.stream()
+                .filter(op -> !Boolean.TRUE.equals(op.getAsap()))
                 .map(Operation::getStartTime).filter(t -> t != null)
                 .min(Comparator.naturalOrder()).orElse(LocalDateTime.now());
-        LocalDateTime projectEnd = operations.stream()
-                .map(Operation::getEffectiveEndTime).filter(t -> t != null)
-                .max(Comparator.naturalOrder()).orElse(projectStart.plusDays(1));
+
+        // Oblicz czasy ASAP (potrzebne do wyznaczenia projectEnd i czasu trwania)
+        Map<String, LocalDateTime[]> asapTimes = computeAsapTimes(operations, uuidToOp, dbIdToOp, ordinalToOp, projectStart);
+
+        LocalDateTime projectEnd = projectStart.plusDays(1);
+        for (Operation op : operations) {
+            LocalDateTime end;
+            if (Boolean.TRUE.equals(op.getAsap()) && op.getUuid() != null) {
+                LocalDateTime[] times = asapTimes.get(op.getUuid());
+                end = times != null ? times[1] : null;
+            } else {
+                end = op.getEffectiveEndTime();
+            }
+            if (end != null && end.isAfter(projectEnd)) projectEnd = end;
+        }
+        final LocalDateTime finalProjectEnd = projectEnd;
+
         Map<String, Set<String>> successors = new HashMap<>();
         for (Operation op : operations) {
             if (op.getUuid() != null) successors.put(op.getUuid(), new HashSet<>());
@@ -399,17 +528,17 @@ public class HelloController {
         Set<String> computed = new HashSet<>();
         for (Operation op : operations) {
             if (op.getUuid() != null) {
-                computeLateFinishByUuid(op.getUuid(), uuidToOp, successors, lateFinish, lateStart, computed, projectEnd);
+                computeLateFinishByUuid(op.getUuid(), uuidToOp, successors, lateFinish, lateStart, computed, finalProjectEnd, asapTimes);
             }
         }
 
-        double totalHours = Duration.between(projectStart, projectEnd).toMinutes() / 60.0;
+        double totalHours = Duration.between(projectStart, finalProjectEnd).toMinutes() / 60.0;
         double totalDays = Math.max(totalHours / 24.0, 0.01);
 
         // Sortuj po LS
         List<Operation> sortedOps = new ArrayList<>(operations);
         sortedOps.sort(Comparator.comparing(op ->
-            op.getUuid() != null ? lateStart.getOrDefault(op.getUuid(), projectEnd) : projectEnd));
+            op.getUuid() != null ? lateStart.getOrDefault(op.getUuid(), finalProjectEnd) : finalProjectEnd));
 
         String[] colors = {
             "#4FC3F7", "#81C784", "#FFB74D", "#E57373",
@@ -420,7 +549,7 @@ public class HelloController {
         List<GanttBarDTO> bars = new ArrayList<>();
         for (int i = 0; i < sortedOps.size(); i++) {
             Operation op = sortedOps.get(i);
-            if (op.getStartTime() == null || op.getEndTime() == null || op.getUuid() == null) continue;
+            if (op.getUuid() == null) continue;
 
             LocalDateTime ls = lateStart.get(op.getUuid());
             LocalDateTime lf = lateFinish.get(op.getUuid());
@@ -449,12 +578,12 @@ public class HelloController {
             bars.add(bar);
         }
 
-        return ResponseEntity.ok(new GanttChartDTO(projectStart, projectEnd, totalDays, bars));
+        return ResponseEntity.ok(new GanttChartDTO(projectStart, finalProjectEnd, totalDays, bars));
     }
 
     /**
      * Backward pass CPM — rekurencyjne obliczanie LF i LS po UUID.
-     * LF(i) = min{ LS(j) } dla następników j, lub projectEnd jeśli brak następników.
+     * Obsługuje operacje ASAP (używa asapTimes do wyznaczenia czasu trwania).
      */
     private void computeLateFinishByUuid(
             String uuid,
@@ -463,23 +592,30 @@ public class HelloController {
             Map<String, LocalDateTime> lateFinish,
             Map<String, LocalDateTime> lateStart,
             Set<String> computed,
-            LocalDateTime projectEnd) {
+            LocalDateTime projectEnd,
+            Map<String, LocalDateTime[]> asapTimes) {
         if (computed.contains(uuid)) return;
 
         Operation op = uuidToOp.get(uuid);
-        if (op == null || op.getStartTime() == null || op.getEffectiveEndTime() == null) {
-            computed.add(uuid);
-            return;
+        if (op == null) { computed.add(uuid); return; }
+
+        Duration duration;
+        if (Boolean.TRUE.equals(op.getAsap())) {
+            LocalDateTime[] times = asapTimes.get(uuid);
+            if (times == null) { computed.add(uuid); return; }
+            duration = Duration.between(times[0], times[1]);
+        } else {
+            if (op.getStartTime() == null || op.getEffectiveEndTime() == null) { computed.add(uuid); return; }
+            duration = Duration.between(op.getStartTime(), op.getEffectiveEndTime());
         }
 
-        Duration duration = Duration.between(op.getStartTime(), op.getEffectiveEndTime());
         Set<String> succs = successors.getOrDefault(uuid, Set.of());
 
         if (succs.isEmpty()) {
             lateFinish.put(uuid, projectEnd);
         } else {
             for (String succUuid : succs) {
-                computeLateFinishByUuid(succUuid, uuidToOp, successors, lateFinish, lateStart, computed, projectEnd);
+                computeLateFinishByUuid(succUuid, uuidToOp, successors, lateFinish, lateStart, computed, projectEnd, asapTimes);
             }
             LocalDateTime minSuccStart = succs.stream()
                     .map(lateStart::get).filter(t -> t != null)

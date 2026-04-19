@@ -62,11 +62,20 @@ public class Operation {
     /** Aktualnie zastosowane skrócenie (dni) — przechowywane w bazie */
     private Integer crashedDays;
 
+    /** Tryb ASAP — operacja startuje jak najwcześniej (po poprzednikach) */
+    private Boolean asap;
+
+    /** Czas trwania operacji ASAP w godzinach (używany gdy asap=true) */
+    private Double asapDurationHours;
+
     // Operacje poprzedzające — przechowywane jako tekst "1,3,5"
     private String predecessorIds;
 
     // Metoda pomocnicza
     public long getDurationInHours() {
+        if (Boolean.TRUE.equals(asap) && asapDurationHours != null) {
+            return (long) Math.floor(asapDurationHours);
+        }
         if (startTime != null && endTime != null) {
             return Duration.between(startTime, endTime).toHours();
         }
@@ -76,6 +85,9 @@ public class Operation {
     // Czas trwania w dniach — obliczany, nie zapisywany w bazie
     @Transient
     public long getDurationInDays() {
+        if (Boolean.TRUE.equals(asap) && asapDurationHours != null) {
+            return (long) Math.ceil(asapDurationHours / 24.0);
+        }
         if (startTime != null && endTime != null) {
             long days = ChronoUnit.DAYS.between(startTime.toLocalDate(), endTime.toLocalDate());
             // Zaokrąglamy w górę jeśli jest część dnia
@@ -87,7 +99,7 @@ public class Operation {
         return 0;
     }
 
-    /** Efektywny czas zakończenia po skróceniu (crashing) */
+    /** Efektywny czas zakończenia po skróceniu (crashing) — tylko dla operacji ze stałymi datami */
     @Transient
     public LocalDateTime getEffectiveEndTime() {
         if (endTime == null) return null;

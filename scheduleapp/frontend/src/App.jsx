@@ -345,6 +345,9 @@ function App() {
     name: '',
     startTime: '',
     endTime: '',
+    asap: false,
+    asapDurationValue: '',
+    asapDurationUnit: 'hours',
     workerCount: 1,
     resources: '',
     totalCost: 0,
@@ -404,13 +407,34 @@ function App() {
     setError('');
 
     try {
-      const dataToSend = {
-        ...formData,
-        predecessorIds: selectedPredecessors.join(',')
-      };
+      let dataToSend;
+      if (formData.asap) {
+        const val = parseFloat(formData.asapDurationValue);
+        if (!val || val <= 0) { setError('Czas trwania musi być większy od 0.'); return; }
+        const durationHours = formData.asapDurationUnit === 'days' ? val * 24 : val;
+        dataToSend = {
+          name: formData.name,
+          asap: true,
+          asapDurationHours: durationHours,
+          workerCount: formData.workerCount,
+          resources: formData.resources,
+          totalCost: formData.totalCost,
+          crashingCostPerDay: formData.crashingCostPerDay,
+          maxCrashingDays: formData.maxCrashingDays,
+          predecessorIds: selectedPredecessors.join(',')
+        };
+      } else {
+        dataToSend = {
+          ...formData,
+          asap: false,
+          predecessorIds: selectedPredecessors.join(',')
+        };
+      }
       await axios.post('/api/operations', dataToSend);
       setFormData({
-        name: '', startTime: '', endTime: '', workerCount: 1, resources: '',
+        name: '', startTime: '', endTime: '', asap: false,
+        asapDurationValue: '', asapDurationUnit: 'hours',
+        workerCount: 1, resources: '',
         totalCost: 0, crashingCostPerDay: 0, maxCrashingDays: 0, predecessorIds: ''
       });
       setSelectedPredecessors([]);
@@ -507,11 +531,51 @@ function App() {
         <label>Nazwa operacji:</label>
         <input type="text" placeholder="np. Montaż" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
 
-        <label>Czas rozpoczęcia:</label>
-        <input type="datetime-local" required value={formData.startTime} onChange={e => setFormData({...formData, startTime: e.target.value})} />
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', userSelect: 'none' }}>
+          <input
+            type="checkbox"
+            checked={formData.asap}
+            onChange={e => setFormData({...formData, asap: e.target.checked})}
+            style={{ width: '16px', height: '16px', accentColor: '#28a745', cursor: 'pointer' }}
+          />
+          <span>Rozpocznij jak najwcześniej (ASAP)</span>
+        </label>
 
-        <label>Czas zakończenia:</label>
-        <input type="datetime-local" required value={formData.endTime} onChange={e => setFormData({...formData, endTime: e.target.value})} />
+        {!formData.asap && (
+          <>
+            <label>Czas rozpoczęcia:</label>
+            <input type="datetime-local" required value={formData.startTime} onChange={e => setFormData({...formData, startTime: e.target.value})} />
+
+            <label>Czas zakończenia:</label>
+            <input type="datetime-local" required value={formData.endTime} onChange={e => setFormData({...formData, endTime: e.target.value})} />
+          </>
+        )}
+
+        {formData.asap && (
+          <>
+            <label>Czas trwania operacji:</label>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <input
+                type="number"
+                min="0.1"
+                step="0.5"
+                placeholder="np. 8"
+                required
+                value={formData.asapDurationValue}
+                onChange={e => setFormData({...formData, asapDurationValue: e.target.value})}
+                style={{ flex: 1 }}
+              />
+              <select
+                value={formData.asapDurationUnit}
+                onChange={e => setFormData({...formData, asapDurationUnit: e.target.value})}
+                style={{ background: '#333', color: 'white', border: '1px solid #555', borderRadius: '4px', padding: '6px 10px', cursor: 'pointer' }}
+              >
+                <option value="hours">godziny</option>
+                <option value="days">dni</option>
+              </select>
+            </div>
+          </>
+        )}
 
         <label>Liczba pracowników:</label>
         <input type="number" min="1" required value={formData.workerCount}
@@ -585,9 +649,16 @@ function App() {
           {operations.length > 0 ? operations.map((op, index) => (
             <tr key={op.id || index} style={{ textAlign: 'center' }}>
               <td style={{ padding: '8px' }}>{op.name}</td>
-              <td>{op.startTime ? new Date(op.startTime).toLocaleString() : '-'}</td>
-              <td>{op.endTime ? new Date(op.endTime).toLocaleString() : '-'}</td>
-              <td>{op.durationInDays ? op.durationInDays + ' dni' : '-'}</td>
+              <td>{op.asap ? <span style={{ color: '#4DC0E1', fontWeight: 'bold' }}>ASAP</span> : (op.startTime ? new Date(op.startTime).toLocaleString() : '-')}</td>
+              <td>{op.asap ? <span style={{ color: '#aaa', fontSize: '12px' }}>—</span> : (op.endTime ? new Date(op.endTime).toLocaleString() : '-')}</td>
+              <td>{op.asap
+                ? (op.asapDurationHours != null
+                    ? (op.asapDurationHours % 24 === 0
+                        ? (op.asapDurationHours / 24) + ' dni'
+                        : op.asapDurationHours + ' h')
+                    : '-')
+                : (op.durationInDays ? op.durationInDays + ' dni' : '-')
+              }</td>
               <td>{op.workerCount}</td>
               <td>{op.resources || '-'}</td>
               <td>{op.totalCost != null ? op.totalCost.toLocaleString() + ' PLN' : '0 PLN'}</td>
