@@ -59,6 +59,9 @@ public class Operation {
     private Double crashingCostPerDay;
     private Integer maxCrashingDays;
 
+    /** Aktualnie zastosowane skrócenie (dni) — przechowywane w bazie */
+    private Integer crashedDays;
+
     // Operacje poprzedzające — przechowywane jako tekst "1,3,5"
     private String predecessorIds;
 
@@ -82,5 +85,13 @@ public class Operation {
             return Math.max(days, 0);
         }
         return 0;
+    }
+
+    /** Efektywny czas zakończenia po skróceniu (crashing) */
+    @Transient
+    public LocalDateTime getEffectiveEndTime() {
+        if (endTime == null) return null;
+        int crashed = crashedDays != null ? crashedDays : 0;
+        return crashed > 0 ? endTime.minusDays(crashed) : endTime;
     }
 }

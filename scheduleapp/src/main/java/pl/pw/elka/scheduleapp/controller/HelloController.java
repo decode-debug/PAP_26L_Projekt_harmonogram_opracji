@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -83,6 +84,23 @@ public class HelloController {
 
         Operation saved = operationRepository.save(operation);
         return ResponseEntity.ok(saved);
+    }
+
+    @PutMapping("/operations/{id}/crash/{crashDays}")
+    public ResponseEntity<?> crashOperation(@PathVariable Long id, @PathVariable int crashDays) {
+        Optional<Operation> opt = operationRepository.findById(id);
+        if (opt.isEmpty()) {
+            return ResponseEntity.badRequest().body("Operacja o ID " + id + " nie istnieje.");
+        }
+        Operation op = opt.get();
+        int max = op.getMaxCrashingDays() != null ? op.getMaxCrashingDays() : 0;
+        if (crashDays < 0 || crashDays > max) {
+            return ResponseEntity.badRequest().body(
+                "Liczba dni skracania musi być między 0 a " + max + ".");
+        }
+        op.setCrashedDays(crashDays);
+        operationRepository.save(op);
+        return ResponseEntity.ok(op);
     }
 
     @DeleteMapping("/operations/{id}")
@@ -299,7 +317,7 @@ public class HelloController {
                 .map(Operation::getStartTime).filter(t -> t != null)
                 .min(Comparator.naturalOrder()).orElse(LocalDateTime.now());
         LocalDateTime projectEnd = operations.stream()
-                .map(Operation::getEndTime).filter(t -> t != null)
+                .map(Operation::getEffectiveEndTime).filter(t -> t != null)
                 .max(Comparator.naturalOrder()).orElse(projectStart.plusDays(1));
 
         double totalHours = Duration.between(projectStart, projectEnd).toMinutes() / 60.0;
@@ -314,16 +332,16 @@ public class HelloController {
         List<GanttBarDTO> bars = new ArrayList<>();
         for (int i = 0; i < operations.size(); i++) {
             Operation op = operations.get(i);
-            if (op.getStartTime() == null || op.getEndTime() == null) continue;
+            if (op.getStartTime() == null || op.getEffectiveEndTime() == null) continue;
 
             double startOffsetHours = Duration.between(projectStart, op.getStartTime()).toMinutes() / 60.0;
-            double durationHours = Duration.between(op.getStartTime(), op.getEndTime()).toMinutes() / 60.0;
+            double durationHours = Duration.between(op.getStartTime(), op.getEffectiveEndTime()).toMinutes() / 60.0;
 
             GanttBarDTO bar = new GanttBarDTO();
             bar.setOperationId(op.getId());
             bar.setName(op.getName());
             bar.setStartTime(op.getStartTime());
-            bar.setEndTime(op.getEndTime());
+            bar.setEndTime(op.getEffectiveEndTime());
             bar.setStartOffsetDays(startOffsetHours / 24.0);
             bar.setDurationDays(durationHours / 24.0);
             bar.setWorkerCount(op.getWorkerCount() != null ? op.getWorkerCount() : 0);
@@ -356,15 +374,13 @@ public class HelloController {
         for (Operation op : operations) dbIdToOp.put(op.getId(), op);
         Map<Long, Operation> ordinalToOp = buildOrdinalMap(operations);
 
-        // Oblicz granice projektu
+        // Oblicz granice projektu (gantt-late)
         LocalDateTime projectStart = operations.stream()
                 .map(Operation::getStartTime).filter(t -> t != null)
                 .min(Comparator.naturalOrder()).orElse(LocalDateTime.now());
         LocalDateTime projectEnd = operations.stream()
-                .map(Operation::getEndTime).filter(t -> t != null)
+                .map(Operation::getEffectiveEndTime).filter(t -> t != null)
                 .max(Comparator.naturalOrder()).orElse(projectStart.plusDays(1));
-
-        // Zbuduj graf następników po UUID
         Map<String, Set<String>> successors = new HashMap<>();
         for (Operation op : operations) {
             if (op.getUuid() != null) successors.put(op.getUuid(), new HashSet<>());
@@ -451,12 +467,12 @@ public class HelloController {
         if (computed.contains(uuid)) return;
 
         Operation op = uuidToOp.get(uuid);
-        if (op == null || op.getStartTime() == null || op.getEndTime() == null) {
+        if (op == null || op.getStartTime() == null || op.getEffectiveEndTime() == null) {
             computed.add(uuid);
             return;
         }
 
-        Duration duration = Duration.between(op.getStartTime(), op.getEndTime());
+        Duration duration = Duration.between(op.getStartTime(), op.getEffectiveEndTime());
         Set<String> succs = successors.getOrDefault(uuid, Set.of());
 
         if (succs.isEmpty()) {
