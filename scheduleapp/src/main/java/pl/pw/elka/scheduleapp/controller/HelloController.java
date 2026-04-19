@@ -91,15 +91,28 @@ public class HelloController {
         if (toDelete.isEmpty()) {
             return ResponseEntity.badRequest().body("Operacja o ID " + id + " nie istnieje.");
         }
-        String deletedUuid = toDelete.get().getUuid();
+        Operation deleted = toDelete.get();
+        String deletedUuid = deleted.getUuid();
+
+        // Poprzednicy usuwanej operacji — ich UUID trafi do następników
+        List<String> inheritedPreds = parsePredecessorValues(deleted.getPredecessorIds());
+
         operationRepository.deleteById(id);
 
-        // Kaskadowe usunięcie UUID z listy poprzedników innych operacji
+        // Dla każdej operacji, która miała usuwaną jako poprzednika:
+        // 1. usuń UUID usuwanej operacji z jej predecessorIds
+        // 2. dodaj (bez duplikatów) poprzedniki usuwanej operacji
         if (deletedUuid != null) {
             List<Operation> remaining = operationRepository.findAll();
             for (Operation op : remaining) {
                 List<String> preds = parsePredecessorValues(op.getPredecessorIds());
                 if (preds.remove(deletedUuid)) {
+                    // Ta operacja była bezpośrednim następnikiem usuwanej — wstrzyknij poprzedniki
+                    for (String inherited : inheritedPreds) {
+                        if (!preds.contains(inherited)) {
+                            preds.add(inherited);
+                        }
+                    }
                     op.setPredecessorIds(preds.isEmpty() ? null : String.join(",", preds));
                     operationRepository.save(op);
                 }
