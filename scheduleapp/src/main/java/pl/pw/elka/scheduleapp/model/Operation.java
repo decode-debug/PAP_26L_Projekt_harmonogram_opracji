@@ -6,6 +6,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -72,6 +73,7 @@ public class Operation {
     private String predecessorIds;
 
     // Metoda pomocnicza
+    @JsonIgnore
     public long getDurationInHours() {
         if (Boolean.TRUE.equals(asap) && asapDurationHours != null) {
             return (long) Math.floor(asapDurationHours);
@@ -84,6 +86,7 @@ public class Operation {
 
     // Czas trwania w dniach — obliczany, nie zapisywany w bazie
     @Transient
+    @JsonIgnore
     public long getDurationInDays() {
         if (Boolean.TRUE.equals(asap) && asapDurationHours != null) {
             return (long) Math.ceil(asapDurationHours / 24.0);
@@ -101,6 +104,7 @@ public class Operation {
 
     /** Efektywny czas zakończenia po skróceniu (crashing) — tylko dla operacji ze stałymi datami */
     @Transient
+    @JsonIgnore
     public LocalDateTime getEffectiveEndTime() {
         if (endTime == null) return null;
         int crashed = crashedDays != null ? crashedDays : 0;

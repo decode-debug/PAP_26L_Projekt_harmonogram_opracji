@@ -1,0 +1,21 @@
+[
+    {
+        "id": 258,
+        "uuid": "79da5b3a-2b38-4d98-8c78-bbb07f2655a7",
+        "name": "Analiza wymagań",
+        "startTime": "2026-05-01T08:00:00",
+        "endTime": "2026-05-04T16:00:00",
+        "workerCount": 3,
+        "resources": "Sala konferencyjna",
+        "totalCost": 4500.0,
+        "crashingCostPerDay": 800.0,
+        "maxCrashingDays": 1,
+        "crashedDays": null,
+        "asap": null,
+        "asapDurationHours": null,
+        "predecessorIds": "",
+        "effectiveEndTime": [ 2026, 5, 4, 16, 0 ],
+        "durationInDays": 4,
+        "durationInHours": 80
+    }
+]
