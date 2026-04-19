@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 
-function GanttChart({ ganttData }) {
+function GanttChart({ ganttData, scrollRef, onScroll }) {
   if (!ganttData || !ganttData.bars || ganttData.bars.length === 0) {
     return <p style={{ color: '#888' }}>Brak operacji do wyświetlenia na wykresie.</p>;
   }
@@ -50,7 +50,7 @@ function GanttChart({ ganttData }) {
   });
 
   return (
-    <div style={{ overflowX: 'auto', marginTop: '10px' }}>
+    <div ref={scrollRef} onScroll={onScroll} style={{ overflowX: 'auto', marginTop: '10px' }}>
       <div style={{
         position: 'relative',
         minWidth: chartContentWidth + 'px',
@@ -175,7 +175,7 @@ function GanttChart({ ganttData }) {
   );
 }
 
-function WorkerChart({ ganttData, title }) {
+function WorkerChart({ ganttData, title, scrollRef, onScroll }) {
   if (!ganttData || !ganttData.bars || ganttData.bars.length === 0) {
     return <p style={{ color: '#888' }}>Brak danych pracowników.</p>;
   }
@@ -231,7 +231,7 @@ function WorkerChart({ ganttData, title }) {
   const linePath = `M ${points.join(' L ')}`;
 
   return (
-    <div style={{ overflowX: 'auto', marginTop: '6px', marginBottom: '30px' }}>
+    <div ref={scrollRef} onScroll={onScroll} style={{ overflowX: 'auto', marginTop: '6px', marginBottom: '30px' }}>
       <div style={{
         position: 'relative',
         minWidth: chartContentWidth + 'px',
@@ -358,6 +358,13 @@ function App() {
   const [error, setError] = useState('');
   const fileInputRef = useRef(null);
   const [selectedPredecessors, setSelectedPredecessors] = useState([]);
+  const ganttEarlyRef = useRef(null);
+  const workerEarlyRef = useRef(null);
+  const ganttLateRef = useRef(null);
+  const workerLateRef = useRef(null);
+  const syncScroll = (targetRef) => (e) => {
+    if (targetRef.current) targetRef.current.scrollLeft = e.currentTarget.scrollLeft;
+  };
 
   const fetchOperations = async () => {
     try {
@@ -527,7 +534,11 @@ function App() {
         )}
       </div>
 
-      <form onSubmit={handleSubmit} style={{ marginBottom: '40px', display: 'grid', gap: '10px', maxWidth: '450px' }}>
+      <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start' }}>
+
+      {/* LEWA KOLUMNA: formularz */}
+      <div style={{ flexShrink: 0, width: '300px' }}>
+      <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '8px' }}>
         <label>Nazwa operacji:</label>
         <input type="text" placeholder="np. Montaż" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
 
@@ -623,12 +634,15 @@ function App() {
           </>
         )}
 
-        <button type="submit" style={{ background: '#28a745', color: 'white', padding: '12px', cursor: 'pointer', border: 'none', fontWeight: 'bold', marginTop: '10px' }}>
+        <button type="submit" style={{ background: '#28a745', color: 'white', padding: '12px', cursor: 'pointer', border: 'none', fontWeight: 'bold', marginTop: '6px' }}>
           ZAPISZ OPERACJĘ
         </button>
       </form>
+      </div>
 
-      <h2>Lista zadań</h2>
+      {/* PRAWA KOLUMNA: tabela + statystyki */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+      <h2 style={{ marginTop: 0 }}>Lista zadań</h2>
       <div style={{ overflowX: 'auto' }}>
       <table border="1" style={{ width: '100%', borderCollapse: 'collapse', color: 'white', borderColor: '#444' }}>
         <thead>
@@ -713,6 +727,9 @@ function App() {
           </div>
         </div>
       )}
+
+      </div>{/* koniec prawej kolumny */}
+      </div>{/* koniec flex row */}
 
       {operations.some(op => (op.maxCrashingDays || 0) > 0) && (
         <>
@@ -802,12 +819,12 @@ function App() {
       )}
 
       <h2 style={{ marginTop: '40px' }}>Wykres Gantta — Najwcześniejsze terminy rozpoczęcia</h2>
-      <GanttChart ganttData={ganttData} />
-      <WorkerChart ganttData={ganttData} title="Wykres pracowników — Najwcześniejsze terminy" />
+      <GanttChart ganttData={ganttData} scrollRef={ganttEarlyRef} onScroll={syncScroll(workerEarlyRef)} />
+      <WorkerChart ganttData={ganttData} title="Wykres pracowników — Najwcześniejsze terminy" scrollRef={workerEarlyRef} onScroll={syncScroll(ganttEarlyRef)} />
 
       <h2 style={{ marginTop: '40px' }}>Wykres Gantta — Najpóźniejsze terminy rozpoczęcia</h2>
-      <GanttChart ganttData={ganttLateData} />
-      <WorkerChart ganttData={ganttLateData} title="Wykres pracowników — Najpóźniejsze terminy" />
+      <GanttChart ganttData={ganttLateData} scrollRef={ganttLateRef} onScroll={syncScroll(workerLateRef)} />
+      <WorkerChart ganttData={ganttLateData} title="Wykres pracowników — Najpóźniejsze terminy" scrollRef={workerLateRef} onScroll={syncScroll(ganttLateRef)} />
     </div>
   );
 }
