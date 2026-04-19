@@ -175,7 +175,7 @@ function GanttChart({ ganttData }) {
   );
 }
 
-function WorkerChart({ ganttData }) {
+function WorkerChart({ ganttData, title }) {
   if (!ganttData || !ganttData.bars || ganttData.bars.length === 0) {
     return <p style={{ color: '#888' }}>Brak danych pracowników.</p>;
   }
@@ -329,7 +329,7 @@ function WorkerChart({ ganttData }) {
 
         {/* Etykieta wykresu */}
         <div style={{ position: 'absolute', bottom: '4px', left: labelWidth + chartPadding + 'px', fontSize: '11px', color: '#888' }}>
-          Liczba pracowników w czasie
+          {title ? title : 'Liczba pracowników w czasie'}
         </div>
       </div>
     </div>
@@ -595,13 +595,13 @@ function App() {
         </tbody>
       </table>
 
-      <h2 style={{ marginTop: '40px' }}>Wykres Gantta</h2>
+      <h2 style={{ marginTop: '40px' }}>Wykres Gantta — Najwcześniejsze terminy rozpoczęcia</h2>
       <GanttChart ganttData={ganttData} />
-      <WorkerChart ganttData={ganttData} />
+      <WorkerChart ganttData={ganttData} title="Wykres pracowników — Najwcześniejsze terminy" />
 
       <h2 style={{ marginTop: '40px' }}>Wykres Gantta — Najpóźniejsze terminy rozpoczęcia</h2>
       <GanttChart ganttData={ganttLateData} />
-      <WorkerChart ganttData={ganttLateData} />
+      <WorkerChart ganttData={ganttLateData} title="Wykres pracowników — Najpóźniejsze terminy" />
     </div>
   );
 }
