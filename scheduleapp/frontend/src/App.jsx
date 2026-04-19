@@ -79,7 +79,7 @@ function GanttChart({ ganttData, scrollRef, onScroll }) {
         {timeLabels.map((_, i) => (
           <div key={'grid-' + i} style={{
             position: 'absolute',
-            left: `calc(${labelWidth}px + ${(i / fullDays) * 100}% - ${(i / fullDays) * (labelWidth + chartPadding * 2)}px)`,
+            left: `calc(${labelWidth + chartPadding}px + ${(i / fullDays) * 100}% - ${(i / fullDays) * (labelWidth + chartPadding * 2)}px)`,
             top: headerHeight + 'px',
             bottom: '0',
             width: '1px',
@@ -92,8 +92,8 @@ function GanttChart({ ganttData, scrollRef, onScroll }) {
         <svg style={{
           position: 'absolute',
           top: 0,
-          left: labelWidth + 'px',
-          width: `calc(100% - ${labelWidth}px)`,
+          left: (labelWidth + chartPadding) + 'px',
+          width: `calc(100% - ${labelWidth + 2 * chartPadding}px)`,
           height: '100%',
           pointerEvents: 'none',
           overflow: 'visible'
@@ -125,7 +125,7 @@ function GanttChart({ ganttData, scrollRef, onScroll }) {
           const tooltip = `${bar.name}\n${barStart.toLocaleString('pl-PL')} — ${barEnd.toLocaleString('pl-PL')}\nPracownicy: ${bar.workerCount}${bar.resources ? '\nZasoby: ' + bar.resources : ''}`;
 
           return (
-            <div key={bar.operationId} style={{ position: 'absolute', top: top + 'px', left: '0', right: '0', height: barHeight + 'px', display: 'flex', alignItems: 'center' }}>
+            <div key={bar.operationId} style={{ position: 'absolute', top: top + 'px', left: chartPadding + 'px', right: chartPadding + 'px', height: barHeight + 'px', display: 'flex', alignItems: 'center' }}>
               {/* Etykieta */}
               <div style={{
                 width: labelWidth + 'px',
@@ -216,19 +216,22 @@ function WorkerChart({ ganttData, title, scrollRef, onScroll }) {
     timeLabels.push(d);
   }
 
-  // Buduj SVG path (wykres warstwowy/fill)
+  // Buduj SVG path (wykres schodkowy/stairs)
   const plotWidth = chartContentWidth - labelWidth - chartPadding * 2;
   const plotHeight = chartHeight - headerHeight - 10;
 
-  const points = workerCounts.map((count, s) => {
-    const x = ((s * step) / totalDays) * plotWidth;
+  const stairParts = [];
+  workerCounts.forEach((count, s) => {
+    const x1 = ((s * step) / totalDays) * plotWidth;
+    const x2 = (((s + 1) * step) / totalDays) * plotWidth;
     const y = plotHeight - (count / maxWorkers) * plotHeight;
-    return `${x},${y}`;
+    if (s === 0) stairParts.push(`M ${x1},${y}`);
+    else stairParts.push(`V ${y}`);
+    stairParts.push(`H ${x2}`);
   });
-  // Zamknij obszar w dół
   const lastX = ((slots * step) / totalDays) * plotWidth;
-  const areaPath = `M ${points.join(' L ')} L ${lastX},${plotHeight} L 0,${plotHeight} Z`;
-  const linePath = `M ${points.join(' L ')}`;
+  const linePath = stairParts.join(' ');
+  const areaPath = `${linePath} L ${lastX},${plotHeight} L 0,${plotHeight} Z`;
 
   return (
     <div ref={scrollRef} onScroll={onScroll} style={{ overflowX: 'auto', marginTop: '6px', marginBottom: '30px' }}>
