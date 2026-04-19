@@ -92,8 +92,8 @@ function GanttChart({ ganttData }) {
         <svg style={{
           position: 'absolute',
           top: 0,
-          left: labelWidth + chartPadding + 'px',
-          width: `calc(100% - ${labelWidth + chartPadding * 2}px)`,
+          left: labelWidth + 'px',
+          width: `calc(100% - ${labelWidth}px)`,
           height: '100%',
           pointerEvents: 'none',
           overflow: 'visible'
@@ -594,6 +594,33 @@ function App() {
           )}
         </tbody>
       </table>
+
+      {operations.length > 0 && (
+        <div style={{ marginTop: '16px', padding: '14px 24px', background: '#2a2a2a', borderRadius: '6px', border: '1px solid #444', display: 'flex', gap: '40px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div>
+            <span style={{ color: '#aaa', fontSize: '13px' }}>Liczba operacji:</span>
+            <span style={{ color: '#fff', fontWeight: 'bold', fontSize: '16px', marginLeft: '10px' }}>{operations.length}</span>
+          </div>
+          <div>
+            <span style={{ color: '#aaa', fontSize: '13px' }}>Łączny koszt projektu:</span>
+            <span style={{ color: '#4DC0E1', fontWeight: 'bold', fontSize: '16px', marginLeft: '10px' }}>
+              {operations.reduce((sum, op) => sum + (op.totalCost || 0), 0).toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} PLN
+            </span>
+          </div>
+          <div>
+            <span style={{ color: '#aaa', fontSize: '13px' }}>Łączny koszt skracania (maks.):</span>
+            <span style={{ color: '#ff6b6b', fontWeight: 'bold', fontSize: '16px', marginLeft: '10px' }}>
+              {operations.reduce((sum, op) => sum + ((op.crashingCostPerDay || 0) * (op.maxCrashingDays || 0)), 0).toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} PLN
+            </span>
+          </div>
+          <div>
+            <span style={{ color: '#aaa', fontSize: '13px' }}>Łączna liczba pracowników (suma):</span>
+            <span style={{ color: '#ffc107', fontWeight: 'bold', fontSize: '16px', marginLeft: '10px' }}>
+              {operations.reduce((sum, op) => sum + (op.workerCount || 0), 0)}
+            </span>
+          </div>
+        </div>
+      )}
 
       <h2 style={{ marginTop: '40px' }}>Wykres Gantta — Najwcześniejsze terminy rozpoczęcia</h2>
       <GanttChart ganttData={ganttData} />
