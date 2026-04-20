@@ -7,7 +7,7 @@ import pl.pw.elka.scheduleapp.model.Operation;
 
 @Repository
 public interface OperationRepository extends JpaRepository<Operation, Long> {
-    // Dzięki dziedziczeniu po JpaRepository masz od razu metody:
+    // Dziedziczenie po JpaRepository od razu metody:
     // save(operation) - zapisz/edytuj
     // findAll() - pobierz wszystkie
     // deleteById(id) - usuń

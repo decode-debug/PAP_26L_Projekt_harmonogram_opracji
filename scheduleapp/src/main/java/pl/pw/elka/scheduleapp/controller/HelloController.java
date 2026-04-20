@@ -333,7 +333,7 @@ public class HelloController {
 
     /**
      * Rozwiązuje predecessorIds na listę operacji poprzedzających.
-     * Obsługuje: UUID (nowy format), DB ID (zgodny), numery porządkowe (stary format).
+     * Obsługuje: UUID, DB ID, numery porządkowe.
      */
     private List<Operation> resolvePredecessorOps(
             String predecessorIdsStr,
