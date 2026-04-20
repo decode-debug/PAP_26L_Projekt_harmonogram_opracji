@@ -592,7 +592,7 @@ function App() {
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               <input
                 type="number"
-                min="0.1"
+                min="0.5"
                 step="0.5"
                 placeholder="np. 8"
                 required
