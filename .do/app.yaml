@@ -1,0 +1,9 @@
+name: pap-26l-projekt-harmonogram-opra
+services:
+- name: pap-26l-projekt-harmonogram-opra
+  dockerfile_path: Dockerfile
+  http_port: 8080
+  instance_count: 1
+  instance_size_slug: basic-xxs
+  routes:
+  - path: /
