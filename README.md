@@ -32,3 +32,6 @@ Aplikacja jest budowana głownie w javie z wykorzystaniem React oraz Spring. Baz
 
 ## Przyszły rozwój
 - automatyczna optymalizacja harmonogramów
+
+## Link do strony z aplikacją
+https://walrus-app-b2im2.ondigitalocean.app/
