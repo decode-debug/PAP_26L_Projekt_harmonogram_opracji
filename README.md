@@ -28,7 +28,7 @@ tworzymy aplikację w 3 warstowej strukturze podzielonej następująco:
  - logika biznesowa
  - baza danych
 
-Aplikacja jest budowana głownie w javie z wykorzystaniem React oraz Spring. Baza danych jest zaimplementowana w CSV (SQL), aczkolwiek jesteśmy otwarci na sugestie co do wyboru bazy danych.
+Aplikacja jest budowana głownie w javie z wykorzystaniem React oraz Spring. Baza danych zapewne będzie zaimplementowana w CSV (SQL), aczkolwiek jesteśmy otwarci na sugestie co do wyboru bazy danych.
 
 ## Przyszły rozwój
 - automatyczna optymalizacja harmonogramów
