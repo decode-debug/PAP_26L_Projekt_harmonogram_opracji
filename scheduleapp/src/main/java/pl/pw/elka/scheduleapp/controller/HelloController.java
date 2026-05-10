@@ -18,6 +18,8 @@ import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,6 +38,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import pl.pw.elka.scheduleapp.dto.GanttBarDTO;
 import pl.pw.elka.scheduleapp.dto.GanttChartDTO;
+import pl.pw.elka.scheduleapp.dto.MergeImportResponseDTO;
 import pl.pw.elka.scheduleapp.model.Operation;
 import pl.pw.elka.scheduleapp.repository.OperationRepository;
 
@@ -48,7 +51,13 @@ public class HelloController {
 
     /** Returns the UUID of the currently authenticated user from the JWT. */
     private String currentUserUuid() {
-        return (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null
+                || authentication instanceof AnonymousAuthenticationToken
+                || authentication.getPrincipal() == null) {
+            return null;
+        }
+        return (String) authentication.getPrincipal();
     }
 
     @GetMapping("/operations")
@@ -268,37 +277,55 @@ public class HelloController {
             List<Operation> operations = mapper.readValue(
                     file.getInputStream(), new TypeReference<List<Operation>>() {});
 
-            // Przypisz nowe UUID każdej importowanej operacji, zachowując tymczasowe mapowanie
+            // Merge preserves UUIDs from the file and skips operations already owned by this user.
+            String userId = currentUserUuid();
+            Set<String> existingUuids = new HashSet<>();
+            for (Operation existing : operationRepository.findByUserId(userId)) {
+                if (existing.getUuid() != null && !existing.getUuid().isBlank()) {
+                    existingUuids.add(existing.getUuid());
+                }
+            }
+
+            List<Operation> operationsToSave = new ArrayList<>();
+            List<String> skippedNames = new ArrayList<>();
+            Set<String> importedUuids = new HashSet<>();
             Map<Long, String> jsonIdToUuid = new HashMap<>();
-            Map<String, String> oldUuidToNew = new HashMap<>();
-            for (Operation op : operations) {
-                String newUuid = UUID.randomUUID().toString();
-                if (op.getId() != null) {
-                    jsonIdToUuid.put(op.getId(), newUuid);
-                }
-                if (op.getUuid() != null && !op.getUuid().isBlank()) {
-                    oldUuidToNew.put(op.getUuid(), newUuid);
-                }
-                op.setUuid(newUuid);
-            }
-
-            // Sortuj wg ID z JSON dla mapowania porządkowego
-            List<Operation> sortedByJsonId = new ArrayList<>(operations);
-            sortedByJsonId.sort(Comparator.comparing(op -> op.getId() != null ? op.getId() : Long.MAX_VALUE));
+            Map<String, String> oldUuidToResolved = new HashMap<>();
             Map<Long, String> ordinalToUuid = new HashMap<>();
-            for (int i = 0; i < sortedByJsonId.size(); i++) {
-                ordinalToUuid.put((long) (i + 1), sortedByJsonId.get(i).getUuid());
+
+            for (int i = 0; i < operations.size(); i++) {
+                Operation op = operations.get(i);
+                String originalUuid = op.getUuid();
+                String resolvedUuid = originalUuid != null && !originalUuid.isBlank()
+                        ? originalUuid
+                        : UUID.randomUUID().toString();
+
+                if (op.getId() != null) {
+                    jsonIdToUuid.put(op.getId(), resolvedUuid);
+                }
+                ordinalToUuid.put((long) (i + 1), resolvedUuid);
+                if (originalUuid != null && !originalUuid.isBlank()) {
+                    oldUuidToResolved.put(originalUuid, resolvedUuid);
+                }
+
+                if (existingUuids.contains(resolvedUuid) || importedUuids.contains(resolvedUuid)) {
+                    skippedNames.add(operationLabel(op));
+                    continue;
+                }
+
+                op.setUuid(resolvedUuid);
+                operationsToSave.add(op);
+                importedUuids.add(resolvedUuid);
             }
 
-            // Konwertuj predecessorIds — liczby → nowe UUID, stare UUID → nowe UUID
-            for (Operation op : operations) {
+            // Konwertuj predecessorIds: liczby -> UUID z pliku, UUID -> zachowane UUID.
+            for (Operation op : operationsToSave) {
                 List<String> preds = parsePredecessorValues(op.getPredecessorIds());
                 if (preds.isEmpty()) continue;
                 List<String> converted = new ArrayList<>();
                 for (String val : preds) {
                     if (isUuidFormat(val)) {
-                        // Stary UUID z pliku → nowy UUID
-                        converted.add(oldUuidToNew.getOrDefault(val, val));
+                        converted.add(oldUuidToResolved.getOrDefault(val, val));
                     } else if (val.matches("\\d+")) {
                         long pid = Long.parseLong(val);
                         String uuid = jsonIdToUuid.containsKey(pid)
@@ -310,18 +337,50 @@ public class HelloController {
                 op.setPredecessorIds(converted.isEmpty() ? null : String.join(",", converted));
             }
 
-            for (Operation op : operations) {
+            for (Operation op : operationsToSave) {
                 op.setId(null);
-                op.setUserId(currentUserUuid());
+                op.setUserId(userId);
             }
-            List<Operation> saved = operationRepository.saveAll(operations);
-            return ResponseEntity.ok(saved);
+            List<Operation> saved = operationRepository.saveAll(operationsToSave);
+            List<String> addedNames = saved.stream()
+                    .map(this::operationLabel)
+                    .toList();
+
+            return ResponseEntity.ok(new MergeImportResponseDTO(
+                    saved,
+                    addedNames,
+                    skippedNames,
+                    buildMergeMessage(addedNames, skippedNames)));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body("Błąd parsowania pliku: " + e.getMessage());
         }
     }
 
     // ======================== POMOCNICY UUID ========================
+
+    private String operationLabel(Operation op) {
+        if (op.getName() != null && !op.getName().isBlank()) {
+            return op.getName();
+        }
+        if (op.getUuid() != null && !op.getUuid().isBlank()) {
+            return op.getUuid();
+        }
+        return "operacja bez nazwy";
+    }
+
+    private String buildMergeMessage(List<String> addedNames, List<String> skippedNames) {
+        List<String> parts = new ArrayList<>();
+        if (!addedNames.isEmpty()) {
+            parts.add("Dodano operacje: " + String.join(", ", addedNames) + ".");
+        }
+        if (!skippedNames.isEmpty()) {
+            parts.add("Pominięto już istniejące operacje: " + String.join(", ", skippedNames) + ".");
+        }
+        if (parts.isEmpty()) {
+            return "Nie znaleziono operacji do dodania.";
+        }
+        return String.join(" ", parts);
+    }
 
     /** Parsuje predecessorIds na listę wartości (UUID lub int) */
     private List<String> parsePredecessorValues(String predecessorIdsStr) {

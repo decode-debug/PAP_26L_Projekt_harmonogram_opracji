@@ -383,6 +383,7 @@ function MainApp({ user, onLogout }) {
     predecessorIds: ''
   });
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const fileInputRef = useRef(null);
   const mergeFileInputRef = useRef(null);
   const [selectedPredecessors, setSelectedPredecessors] = useState([]);
@@ -440,6 +441,7 @@ function MainApp({ user, onLogout }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setNotice('');
 
     try {
       let dataToSend;
@@ -484,6 +486,7 @@ function MainApp({ user, onLogout }) {
     if (!confirm("Czy na pewno chcesz usunąć tę operację?")) return;
     try {
       await axios.delete(`/api/operations/${id}`);
+      setNotice('');
       refreshAll();
     } catch (err) {
       setError("Błąd usuwania operacji.");
@@ -494,6 +497,7 @@ function MainApp({ user, onLogout }) {
     if (!confirm("Czy na pewno chcesz usunąć WSZYSTKIE operacje?")) return;
     try {
       await axios.delete('/api/operations');
+      setNotice('');
       refreshAll();
     } catch (err) {
       setError("Błąd usuwania operacji.");
@@ -513,6 +517,7 @@ function MainApp({ user, onLogout }) {
       link.remove();
       window.URL.revokeObjectURL(url);
       setError('');
+      setNotice('');I
     } catch (err) {
       if (err.response?.status === 401) return;
 
@@ -558,6 +563,7 @@ function MainApp({ user, onLogout }) {
       await axios.post('/api/operations/import', form);
       refreshAll();
       setError('');
+      setNotice('');
     } catch (err) {
       const msg = err.response?.data || "Błąd importu — sprawdź format pliku.";
       setError(typeof msg === 'string' ? msg : JSON.stringify(msg));
@@ -571,11 +577,13 @@ function MainApp({ user, onLogout }) {
     try {
       const form = new FormData();
       form.append('file', file);
-      await axios.post('/api/operations/import-merge', form);
+      const res = await axios.post('/api/operations/import-merge', form);
       refreshAll();
       setError('');
+      setNotice(res.data?.message || 'Dołączono operacje z pliku.');
     } catch (err) {
       const msg = err.response?.data || 'Błąd scalania — sprawdź format pliku.';
+      setNotice('');
       setError(typeof msg === 'string' ? msg : JSON.stringify(msg));
     }
     mergeFileInputRef.current.value = '';
@@ -599,6 +607,7 @@ function MainApp({ user, onLogout }) {
       <h1>Harmonogram Operacji</h1>
 
       {error && <div style={{ color: '#ff6b6b', marginBottom: '15px', padding: '10px', border: '1px solid #ff6b6b', borderRadius: '4px' }}>{error}</div>}
+      {notice && <div style={{ color: '#8fd694', marginBottom: '15px', padding: '10px', border: '1px solid #2d7a34', borderRadius: '4px', background: '#142318' }}>{notice}</div>}
 
       <div style={{ marginBottom: '20px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
         <button onClick={handleExport} style={{ ...btnStyle, background: '#17a2b8', color: 'white' }}>

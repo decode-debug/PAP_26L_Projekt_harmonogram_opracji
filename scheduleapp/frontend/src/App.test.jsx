@@ -457,7 +457,14 @@ describe('App', () => {
 
   it('merge file triggers import-merge endpoint and refreshes data', async () => {
     mockInitialLoads()
-    axios.post.mockResolvedValue({ data: [{ id: 100, name: 'Scalona' }] })
+    axios.post.mockResolvedValue({
+      data: {
+        addedOperations: [{ id: 100, name: 'Scalona' }],
+        addedNames: ['Scalona'],
+        skippedNames: [],
+        message: 'Dodano operacje: Scalona.',
+      },
+    })
 
     const { container } = render(<App />)
     await screen.findAllByText('Nazwa operacji:')
@@ -476,6 +483,7 @@ describe('App', () => {
       )
     })
     expect(axios.get).toHaveBeenCalledWith('/api/operations')
+    expect(await screen.findByText('Dodano operacje: Scalona.')).toBeInTheDocument()
   })
 
   // ============================================================
