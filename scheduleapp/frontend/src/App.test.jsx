@@ -1,9 +1,10 @@
 import React from 'react'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
+import { AuthProvider } from './context/AuthContext.jsx'
 import axios from 'axios'
 
 vi.mock('axios')
@@ -20,8 +21,15 @@ function mockInitialLoads(operations = [], ganttData = emptyGantt, ganttLateData
     if (url === '/api/operations') return Promise.resolve({ data: operations })
     if (url === '/api/operations/gantt') return Promise.resolve({ data: ganttData })
     if (url === '/api/operations/gantt-late') return Promise.resolve({ data: ganttLateData })
+    if (url === '/api/operations/export') {
+      return Promise.resolve({ data: new Blob(['[]'], { type: 'application/json' }) })
+    }
     return Promise.reject(new Error(`Unexpected GET ${url}`))
   })
+}
+
+function render(ui) {
+  return rtlRender(<AuthProvider>{ui}</AuthProvider>)
 }
 
 const sampleOperation = {
@@ -44,11 +52,28 @@ const sampleOperation = {
 describe('App', () => {
   afterEach(() => {
     cleanup()
+    sessionStorage.clear()
+    vi.restoreAllMocks()
   })
 
   beforeEach(() => {
     vi.clearAllMocks()
+    sessionStorage.setItem('token', 'test-token')
+    sessionStorage.setItem('user', JSON.stringify({
+      uuid: 'test-user',
+      name: 'Test User',
+      email: 'test@example.com',
+    }))
     window.confirm = vi.fn(() => true)
+    Object.defineProperty(window.URL, 'createObjectURL', {
+      value: vi.fn(() => 'blob:download-url'),
+      configurable: true,
+    })
+    Object.defineProperty(window.URL, 'revokeObjectURL', {
+      value: vi.fn(),
+      configurable: true,
+    })
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
   })
 
   it('renders empty-state charts after loading without operations', async () => {
@@ -343,22 +368,19 @@ describe('App', () => {
   // TESTY: Eksport i import pliku
   // ============================================================
 
-  it('export button sets window.location.href to the export endpoint', async () => {
+  it('export button downloads JSON through authenticated axios request', async () => {
     mockInitialLoads()
-
-    // Zastąp window.location obiektem z możliwością odczytu href
-    Object.defineProperty(window, 'location', {
-      value: { href: '' },
-      writable: true,
-      configurable: true,
-    })
 
     render(<App />)
     await screen.findAllByText('Nazwa operacji:')
 
     fireEvent.click(screen.getByRole('button', { name: 'Zapisz do pliku (JSON)' }))
 
-    expect(window.location.href).toBe('/api/operations/export')
+    await waitFor(() => {
+      expect(axios.get).toHaveBeenCalledWith('/api/operations/export', { responseType: 'blob' })
+    })
+    expect(window.URL.createObjectURL).toHaveBeenCalled()
+    expect(window.URL.revokeObjectURL).toHaveBeenCalledWith('blob:download-url')
   })
 
   it('import button triggers file input click', async () => {

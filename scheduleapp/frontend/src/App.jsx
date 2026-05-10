@@ -348,10 +348,10 @@ function App() {
 
   // Handle 401 events fired by axios interceptor
   useEffect(() => {
-    const handler = () => { /* Auth state is already cleared in sessionStorage; re-render handles it */ };
+    const handler = () => logout();
     window.addEventListener('auth:logout', handler);
     return () => window.removeEventListener('auth:logout', handler);
-  }, []);
+  }, [logout]);
 
   if (!isLoggedIn) {
     if (authView === 'register') {
@@ -500,8 +500,34 @@ function MainApp({ user, onLogout }) {
     }
   };
 
-  const handleExport = () => {
-    window.location.href = '/api/operations/export';
+  const handleExport = async () => {
+    try {
+      const res = await axios.get('/api/operations/export', { responseType: 'blob' });
+      const blob = new Blob([res.data], { type: 'application/json' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'harmonogram.json';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      setError('');
+    } catch (err) {
+      if (err.response?.status === 401) return;
+
+      let msg = 'Błąd eksportu — spróbuj zalogować się ponownie.';
+      if (err.response?.data) {
+        if (err.response.data instanceof Blob) {
+          msg = await err.response.data.text() || msg;
+        } else {
+          msg = typeof err.response.data === 'string'
+            ? err.response.data
+            : JSON.stringify(err.response.data);
+        }
+      }
+      setError(msg);
+    }
   };
 
   const handleApplyCrashing = async () => {
