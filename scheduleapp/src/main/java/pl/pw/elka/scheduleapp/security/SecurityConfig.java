@@ -46,6 +46,8 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/h2-console/**").permitAll()
+                // Serve the React SPA without authentication
+                .requestMatchers("/", "/index.html", "/assets/**", "/favicon.ico", "/*.js", "/*.css", "/*.map").permitAll()
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
@@ -60,11 +62,19 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of(
+        String extraOrigins = System.getenv("CORS_ALLOWED_ORIGINS");
+        List<String> origins = new java.util.ArrayList<>(List.of(
                 "http://localhost:5173",
                 "http://localhost:3000",
                 "http://localhost:8080"
         ));
+        if (extraOrigins != null && !extraOrigins.isBlank()) {
+            for (String o : extraOrigins.split(",")) {
+                String trimmed = o.trim();
+                if (!trimmed.isEmpty()) origins.add(trimmed);
+            }
+        }
+        config.setAllowedOrigins(origins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setExposedHeaders(List.of("X-Auth-Token"));
