@@ -5,8 +5,9 @@ import './index.css'
 import App from './App.jsx'
 import { AuthProvider } from './context/AuthContext.jsx'
 
-// Global axios defaults — backend is served on port 8080 during development
-axios.defaults.baseURL = 'http://localhost:8080'
+// In production the frontend is served by Spring Boot on the same origin,
+// so relative URLs are used. In development, Vite's proxy forwards /api → localhost:8080.
+// No baseURL is needed in either case.
 
 // Attach JWT token to every outgoing request
 axios.interceptors.request.use(config => {
