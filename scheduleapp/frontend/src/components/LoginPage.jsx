@@ -16,6 +16,12 @@ export default function LoginPage({ onGoRegister }) {
     setError('');
     setLoading(true);
     try {
+      if (!window.crypto?.subtle) {
+        setError('Przeglądarka nie obsługuje szyfrowania (wymagane HTTPS). Spróbuj przez https://.');
+        setLoading(false);
+        return;
+      }
+
       // 1. Fetch the server's RSA public key
       const pkRes = await axios.get('/api/auth/public-key');
       const publicKeyBase64 = pkRes.data.publicKey;
@@ -28,7 +34,12 @@ export default function LoginPage({ onGoRegister }) {
       const { token, uuid, name } = res.data;
       login(token, { uuid, name, email: res.data.email });
     } catch (err) {
-      setError(err.response?.data || 'Błąd logowania. Sprawdź email i hasło.');
+      if (err.response?.data) {
+        const data = err.response.data;
+        setError(typeof data === 'string' ? data : JSON.stringify(data));
+      } else {
+        setError('Błąd logowania: ' + (err.message || 'Sprawdź email i hasło.'));
+      }
     } finally {
       setLoading(false);
     }
