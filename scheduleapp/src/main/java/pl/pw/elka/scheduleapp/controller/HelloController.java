@@ -18,7 +18,7 @@ import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -41,15 +41,19 @@ import pl.pw.elka.scheduleapp.repository.OperationRepository;
 
 @RestController
 @RequestMapping("/api")
-@CrossOrigin(origins = "*")
 public class HelloController {
 
     @Autowired
     private OperationRepository operationRepository;
 
+    /** Returns the UUID of the currently authenticated user from the JWT. */
+    private String currentUserUuid() {
+        return (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+    }
+
     @GetMapping("/operations")
     public List<Operation> getAllOperations() {
-        return operationRepository.findAll();
+        return operationRepository.findByUserId(currentUserUuid());
     }
 
     @PostMapping("/operations")
@@ -99,13 +103,14 @@ public class HelloController {
             return ResponseEntity.badRequest().body("Liczba pracowników musi wynosić co najmniej 1.");
         }
 
+        operation.setUserId(currentUserUuid());
         Operation saved = operationRepository.save(operation);
         return ResponseEntity.ok(saved);
     }
 
     @PutMapping("/operations/{id}/crash/{crashDays}")
     public ResponseEntity<?> crashOperation(@PathVariable Long id, @PathVariable int crashDays) {
-        Optional<Operation> opt = operationRepository.findById(id);
+        Optional<Operation> opt = operationRepository.findByIdAndUserId(id, currentUserUuid());
         if (opt.isEmpty()) {
             return ResponseEntity.badRequest().body("Operacja o ID " + id + " nie istnieje.");
         }
@@ -122,7 +127,8 @@ public class HelloController {
 
     @DeleteMapping("/operations/{id}")
     public ResponseEntity<?> deleteOperation(@PathVariable Long id) {
-        Optional<Operation> toDelete = operationRepository.findById(id);
+        String userId = currentUserUuid();
+        Optional<Operation> toDelete = operationRepository.findByIdAndUserId(id, userId);
         if (toDelete.isEmpty()) {
             return ResponseEntity.badRequest().body("Operacja o ID " + id + " nie istnieje.");
         }
@@ -138,7 +144,7 @@ public class HelloController {
         // 1. usuń UUID usuwanej operacji z jej predecessorIds
         // 2. dodaj (bez duplikatów) poprzedniki usuwanej operacji
         if (deletedUuid != null) {
-            List<Operation> remaining = operationRepository.findAll();
+            List<Operation> remaining = operationRepository.findByUserId(userId);
             for (Operation op : remaining) {
                 List<String> preds = parsePredecessorValues(op.getPredecessorIds());
                 if (preds.remove(deletedUuid)) {
@@ -158,7 +164,7 @@ public class HelloController {
 
     @DeleteMapping("/operations")
     public ResponseEntity<?> deleteAllOperations() {
-        operationRepository.deleteAll();
+        operationRepository.deleteByUserId(currentUserUuid());
         return ResponseEntity.ok("Usunięto wszystkie operacje.");
     }
 
@@ -169,7 +175,7 @@ public class HelloController {
             ObjectMapper mapper = new ObjectMapper();
             mapper.registerModule(new JavaTimeModule());
             byte[] jsonBytes = mapper.writerWithDefaultPrettyPrinter()
-                    .writeValueAsBytes(operationRepository.findAll());
+                    .writeValueAsBytes(operationRepository.findByUserId(currentUserUuid()));
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -195,16 +201,19 @@ public class HelloController {
             List<Operation> operations = mapper.readValue(
                     file.getInputStream(), new TypeReference<List<Operation>>() {});
 
-            // 1. Przypisz UUID operacjom, które go nie mają
-            //    Zbuduj mapy: jsonId → uuid  i  numer porządkowy → uuid
+            // Zawsze generuj NOWE UUID-y, aby uniknąć konfliktu unikalności z operacjami
+            // innych użytkowników lub danymi sprzed wprowadzenia autentykacji (userId=null).
             Map<Long, String> jsonIdToUuid = new HashMap<>();
+            Map<String, String> oldUuidToNew = new HashMap<>();
             for (Operation op : operations) {
-                if (op.getUuid() == null || op.getUuid().isBlank()) {
-                    op.setUuid(UUID.randomUUID().toString());
-                }
+                String newUuid = UUID.randomUUID().toString();
                 if (op.getId() != null) {
-                    jsonIdToUuid.put(op.getId(), op.getUuid());
+                    jsonIdToUuid.put(op.getId(), newUuid);
                 }
+                if (op.getUuid() != null && !op.getUuid().isBlank()) {
+                    oldUuidToNew.put(op.getUuid(), newUuid);
+                }
+                op.setUuid(newUuid);
             }
 
             // Sortuj wg ID z JSON dla mapowania porządkowego
@@ -215,31 +224,29 @@ public class HelloController {
                 ordinalToUuid.put((long) (i + 1), sortedByJsonId.get(i).getUuid());
             }
 
-            // 2. Konwertuj predecessorIds z liczb całkowitych na UUID
+            // Konwertuj predecessorIds: liczby → nowe UUID, stare UUID → nowe UUID
             for (Operation op : operations) {
                 List<String> preds = parsePredecessorValues(op.getPredecessorIds());
-                boolean hasIntegerPreds = preds.stream().anyMatch(s -> s.matches("\\d+"));
-                if (hasIntegerPreds) {
-                    List<String> converted = new ArrayList<>();
-                    for (String val : preds) {
-                        if (isUuidFormat(val)) {
-                            converted.add(val);
-                        } else if (val.matches("\\d+")) {
-                            long pid = Long.parseLong(val);
-                            // Szukaj najpierw w jsonId, potem w numerach porządkowych
-                            String uuid = jsonIdToUuid.containsKey(pid)
-                                    ? jsonIdToUuid.get(pid)
-                                    : ordinalToUuid.get(pid);
-                            if (uuid != null) converted.add(uuid);
-                        }
+                if (preds.isEmpty()) continue;
+                List<String> converted = new ArrayList<>();
+                for (String val : preds) {
+                    if (isUuidFormat(val)) {
+                        converted.add(oldUuidToNew.getOrDefault(val, val));
+                    } else if (val.matches("\\d+")) {
+                        long pid = Long.parseLong(val);
+                        String uuid = jsonIdToUuid.containsKey(pid)
+                                ? jsonIdToUuid.get(pid)
+                                : ordinalToUuid.get(pid);
+                        if (uuid != null) converted.add(uuid);
                     }
-                    op.setPredecessorIds(converted.isEmpty() ? null : String.join(",", converted));
                 }
+                op.setPredecessorIds(converted.isEmpty() ? null : String.join(",", converted));
             }
 
-            operationRepository.deleteAll();
+            operationRepository.deleteByUserId(currentUserUuid());
             for (Operation op : operations) {
                 op.setId(null);
+                op.setUserId(currentUserUuid());
             }
             List<Operation> saved = operationRepository.saveAll(operations);
             return ResponseEntity.ok(saved);
@@ -305,6 +312,7 @@ public class HelloController {
 
             for (Operation op : operations) {
                 op.setId(null);
+                op.setUserId(currentUserUuid());
             }
             List<Operation> saved = operationRepository.saveAll(operations);
             return ResponseEntity.ok(saved);
@@ -452,7 +460,7 @@ public class HelloController {
     // Wykres Gantta — backend oblicza pozycje i kolory pasków
     @GetMapping("/operations/gantt")
     public ResponseEntity<?> getGanttChart() {
-        List<Operation> operations = operationRepository.findAll();
+        List<Operation> operations = operationRepository.findByUserId(currentUserUuid());
         if (operations.isEmpty()) {
             return ResponseEntity.ok(new GanttChartDTO(null, null, 0, List.of()));
         }
@@ -542,7 +550,7 @@ public class HelloController {
     // Wykres Gantta — najpóźniejsze terminy rozpoczęcia (backward pass CPM)
     @GetMapping("/operations/gantt-late")
     public ResponseEntity<?> getGanttChartLate() {
-        List<Operation> operations = operationRepository.findAll();
+        List<Operation> operations = operationRepository.findByUserId(currentUserUuid());
         if (operations.isEmpty()) {
             return ResponseEntity.ok(new GanttChartDTO(null, null, 0, List.of()));
         }

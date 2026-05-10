@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
+import { useAuth } from './context/AuthContext.jsx'
+import LoginPage from './components/LoginPage.jsx'
+import RegisterPage from './components/RegisterPage.jsx'
 
 function GanttChart({ ganttData, scrollRef, onScroll }) {
   if (!ganttData || !ganttData.bars || ganttData.bars.length === 0) {
@@ -340,6 +343,27 @@ function WorkerChart({ ganttData, title, scrollRef, onScroll }) {
 }
 
 function App() {
+  const { isLoggedIn, user, logout } = useAuth();
+  const [authView, setAuthView] = useState('login'); // 'login' | 'register'
+
+  // Handle 401 events fired by axios interceptor
+  useEffect(() => {
+    const handler = () => { /* Auth state is already cleared in sessionStorage; re-render handles it */ };
+    window.addEventListener('auth:logout', handler);
+    return () => window.removeEventListener('auth:logout', handler);
+  }, []);
+
+  if (!isLoggedIn) {
+    if (authView === 'register') {
+      return <RegisterPage onGoLogin={() => setAuthView('login')} />;
+    }
+    return <LoginPage onGoRegister={() => setAuthView('register')} />;
+  }
+
+  return <MainApp user={user} onLogout={logout} />;
+}
+
+function MainApp({ user, onLogout }) {
   const [operations, setOperations] = useState([]);
   const [ganttData, setGanttData] = useState(null);
   const [ganttLateData, setGanttLateData] = useState(null);
@@ -534,7 +558,18 @@ function App() {
   const btnStyle = { padding: '8px 16px', cursor: 'pointer', border: 'none', fontWeight: 'bold', borderRadius: '4px' };
 
   return (
-    <div style={{ padding: '20px', fontFamily: 'Arial', color: 'white', backgroundColor: '#1a1a1a', minHeight: '100vh' }}>
+    <div style={{ padding: '20px', fontFamily: 'Arial', color: 'white', backgroundColor: '#1a1a1a', minHeight: '100vh', position: 'relative' }}>
+      <div style={{ position: 'absolute', top: '20px', right: '20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <span style={{ color: '#aaa', fontSize: '13px' }}>
+          Zalogowany: <strong>{user?.name}</strong> <span style={{ color: '#666' }}>({user?.email})</span>
+        </span>
+        <button
+          onClick={onLogout}
+          style={{ ...btnStyle, background: '#444', color: '#ddd', fontSize: '12px', padding: '4px 12px' }}
+        >
+          Wyloguj
+        </button>
+      </div>
       <h1>Harmonogram Operacji</h1>
 
       {error && <div style={{ color: '#ff6b6b', marginBottom: '15px', padding: '10px', border: '1px solid #ff6b6b', borderRadius: '4px' }}>{error}</div>}
