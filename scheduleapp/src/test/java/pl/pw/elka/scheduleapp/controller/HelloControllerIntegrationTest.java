@@ -43,7 +43,8 @@ import pl.pw.elka.scheduleapp.repository.OperationRepository;
         "spring.datasource.driverClassName=org.h2.Driver",
         "spring.datasource.username=sa",
         "spring.datasource.password=",
-        "spring.jpa.hibernate.ddl-auto=create-drop"
+        "spring.jpa.hibernate.ddl-auto=create-drop",
+        "app.security.enabled=false"
 })
 class HelloControllerIntegrationTest {
 
@@ -284,7 +285,7 @@ class HelloControllerIntegrationTest {
     }
 
     @Test
-    void shouldMergeImportedOperationsAndRemapInternalUuidReferences() throws Exception {
+    void shouldMergeImportedOperationsPreserveUuidsAndSkipDuplicates() throws Exception {
         Operation existing = saveStandardOperation("Istniejąca", "uuid-existing",
                 LocalDateTime.of(2026, 4, 19, 8, 0),
                 LocalDateTime.of(2026, 4, 20, 8, 0),
@@ -319,7 +320,9 @@ class HelloControllerIntegrationTest {
                         .file(file)
                         .contentType(MULTIPART_FORM_DATA))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", org.hamcrest.Matchers.hasSize(2)));
+                .andExpect(jsonPath("$.addedOperations", org.hamcrest.Matchers.hasSize(2)))
+                .andExpect(jsonPath("$.addedNames", org.hamcrest.Matchers.containsInAnyOrder("Import A", "Import B")))
+                .andExpect(jsonPath("$.skippedNames", org.hamcrest.Matchers.hasSize(0)));
 
         List<Operation> all = operationRepository.findAll();
         assertThat(all).hasSize(3);
@@ -327,9 +330,22 @@ class HelloControllerIntegrationTest {
 
         Operation importA = all.stream().filter(op -> op.getName().equals("Import A")).findFirst().orElseThrow();
         Operation importB = all.stream().filter(op -> op.getName().equals("Import B")).findFirst().orElseThrow();
-        assertThat(importA.getUuid()).isNotEqualTo("11111111-1111-1111-1111-111111111111");
-        assertThat(importB.getUuid()).isNotEqualTo("22222222-2222-2222-2222-222222222222");
+        assertThat(importA.getUuid()).isEqualTo("11111111-1111-1111-1111-111111111111");
+        assertThat(importB.getUuid()).isEqualTo("22222222-2222-2222-2222-222222222222");
         assertThat(importB.getPredecessorIds()).isEqualTo(importA.getUuid());
+
+        MockMultipartFile duplicateFile = new MockMultipartFile(
+                "file", "merge.json", MediaType.APPLICATION_JSON_VALUE, json.getBytes(StandardCharsets.UTF_8));
+
+        mockMvc.perform(multipart("/api/operations/import-merge")
+                        .file(duplicateFile)
+                        .contentType(MULTIPART_FORM_DATA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.addedOperations", org.hamcrest.Matchers.hasSize(0)))
+                .andExpect(jsonPath("$.skippedNames", org.hamcrest.Matchers.containsInAnyOrder("Import A", "Import B")))
+                .andExpect(jsonPath("$.message", org.hamcrest.Matchers.containsString("Pominięto")));
+
+        assertThat(operationRepository.findAll()).hasSize(3);
     }
 
     @Test
@@ -652,7 +668,8 @@ class HelloControllerIntegrationTest {
                         .file(file)
                         .contentType(MULTIPART_FORM_DATA))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", org.hamcrest.Matchers.hasSize(1)));
+                .andExpect(jsonPath("$.addedOperations", org.hamcrest.Matchers.hasSize(1)))
+                .andExpect(jsonPath("$.addedNames", org.hamcrest.Matchers.contains("Importowana")));
 
         // Obie operacje powinny być w bazie
         assertThat(operationRepository.findAll()).hasSize(2);

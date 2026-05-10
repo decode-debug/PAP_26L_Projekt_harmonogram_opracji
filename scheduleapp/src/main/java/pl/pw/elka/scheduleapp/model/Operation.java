@@ -72,6 +72,10 @@ public class Operation {
     // Operacje poprzedzające — przechowywane jako tekst "1,3,5"
     private String predecessorIds;
 
+    /** UUID właściciela — każda operacja należy do konkretnego użytkownika */
+    @Column(name = "user_id")
+    private String userId;
+
     // Metoda pomocnicza
     @JsonIgnore
     public long getDurationInHours() {
