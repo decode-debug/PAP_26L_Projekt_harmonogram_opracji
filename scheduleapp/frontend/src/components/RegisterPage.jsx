@@ -1,20 +1,8 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
-
-async function rsaEncrypt(plaintext, publicKeyBase64) {
-  const binaryDer = Uint8Array.from(atob(publicKeyBase64), c => c.charCodeAt(0));
-  const publicKey = await window.crypto.subtle.importKey(
-    'spki',
-    binaryDer.buffer,
-    { name: 'RSA-OAEP', hash: 'SHA-256' },
-    false,
-    ['encrypt']
-  );
-  const encoded = new TextEncoder().encode(plaintext);
-  const encrypted = await window.crypto.subtle.encrypt({ name: 'RSA-OAEP' }, publicKey, encoded);
-  return btoa(String.fromCharCode(...new Uint8Array(encrypted)));
-}
+import AuthCard, { inputStyle, labelStyle } from './AuthCard';
+import { rsaEncrypt } from '../utils/crypto';
 
 export default function RegisterPage({ onGoLogin }) {
   const { login } = useAuth();
@@ -56,125 +44,12 @@ export default function RegisterPage({ onGoLogin }) {
     }
   };
 
-  const inputStyle = {
-    width: '100%',
-    padding: '10px 12px',
-    background: '#2a2a2a',
-    border: '1px solid #555',
-    borderRadius: '4px',
-    color: 'white',
-    fontSize: '14px',
-    boxSizing: 'border-box'
-  };
-
-  const labelStyle = { fontSize: '13px', color: '#aaa', marginBottom: '4px', display: 'block' };
-
   return (
-    <div style={{
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      minHeight: '100vh',
-      background: '#1a1a1a',
-      fontFamily: 'Arial, sans-serif'
-    }}>
-      <div style={{
-        background: '#222',
-        border: '1px solid #444',
-        borderRadius: '8px',
-        padding: '40px',
-        width: '360px',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.5)'
-      }}>
-        <h2 style={{ color: 'white', marginTop: 0, marginBottom: '8px', textAlign: 'center' }}>
-          Rejestracja
-        </h2>
-        <p style={{ color: '#888', textAlign: 'center', marginTop: 0, marginBottom: '28px', fontSize: '13px' }}>
-          Stwórz nowe konto
-        </p>
-
-        {error && (
-          <div style={{
-            color: '#ff6b6b',
-            background: 'rgba(255,107,107,0.1)',
-            border: '1px solid #ff6b6b',
-            borderRadius: '4px',
-            padding: '10px',
-            marginBottom: '16px',
-            fontSize: '13px'
-          }}>
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div>
-            <label style={labelStyle}>Imię i nazwisko</label>
-            <input
-              type="text"
-              required
-              value={name}
-              onChange={e => setName(e.target.value)}
-              placeholder="Jan Kowalski"
-              style={inputStyle}
-              autoComplete="name"
-            />
-          </div>
-          <div>
-            <label style={labelStyle}>Adres e-mail</label>
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              placeholder="jan@example.com"
-              style={inputStyle}
-              autoComplete="username"
-            />
-          </div>
-          <div>
-            <label style={labelStyle}>Hasło <span style={{ color: '#666' }}>(min. 6 znaków)</span></label>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="••••••••"
-              style={inputStyle}
-              autoComplete="new-password"
-            />
-          </div>
-          <div>
-            <label style={labelStyle}>Powtórz hasło</label>
-            <input
-              type="password"
-              required
-              value={passwordConfirm}
-              onChange={e => setPasswordConfirm(e.target.value)}
-              placeholder="••••••••"
-              style={inputStyle}
-              autoComplete="new-password"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              background: loading ? '#555' : '#28a745',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              padding: '12px',
-              fontWeight: 'bold',
-              fontSize: '15px',
-              cursor: loading ? 'default' : 'pointer',
-              marginTop: '4px'
-            }}
-          >
-            {loading ? 'Rejestrowanie...' : 'Zarejestruj się'}
-          </button>
-        </form>
-
+    <AuthCard
+      title="Rejestracja"
+      subtitle="Stwórz nowe konto"
+      error={error}
+      footer={
         <p style={{ textAlign: 'center', color: '#888', marginTop: '20px', fontSize: '13px' }}>
           Masz już konto?{' '}
           <button
@@ -184,7 +59,75 @@ export default function RegisterPage({ onGoLogin }) {
             Zaloguj się
           </button>
         </p>
-      </div>
-    </div>
+      }
+    >
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div>
+          <label style={labelStyle}>Imię i nazwisko</label>
+          <input
+            type="text"
+            required
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="Jan Kowalski"
+            style={inputStyle}
+            autoComplete="name"
+          />
+        </div>
+        <div>
+          <label style={labelStyle}>Adres e-mail</label>
+          <input
+            type="email"
+            required
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            placeholder="jan@example.com"
+            style={inputStyle}
+            autoComplete="username"
+          />
+        </div>
+        <div>
+          <label style={labelStyle}>Hasło <span style={{ color: '#666' }}>(min. 6 znaków)</span></label>
+          <input
+            type="password"
+            required
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder="••••••••"
+            style={inputStyle}
+            autoComplete="new-password"
+          />
+        </div>
+        <div>
+          <label style={labelStyle}>Powtórz hasło</label>
+          <input
+            type="password"
+            required
+            value={passwordConfirm}
+            onChange={e => setPasswordConfirm(e.target.value)}
+            placeholder="••••••••"
+            style={inputStyle}
+            autoComplete="new-password"
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={loading}
+          style={{
+            background: loading ? '#555' : '#28a745',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            padding: '12px',
+            fontWeight: 'bold',
+            fontSize: '15px',
+            cursor: loading ? 'default' : 'pointer',
+            marginTop: '4px'
+          }}
+        >
+          {loading ? 'Rejestrowanie...' : 'Zarejestruj się'}
+        </button>
+      </form>
+    </AuthCard>
   );
 }

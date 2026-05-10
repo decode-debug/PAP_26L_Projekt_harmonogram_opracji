@@ -395,38 +395,32 @@ function MainApp({ user, onLogout }) {
     if (targetRef.current) targetRef.current.scrollLeft = e.currentTarget.scrollLeft;
   };
 
-  const fetchOperations = async () => {
+  const updateForm = (field, value) => setFormData(f => ({ ...f, [field]: value }));
+
+  const extractErrorMsg = (err, fallback) => {
+    const msg = err.response?.data || fallback;
+    return typeof msg === 'string' ? msg : JSON.stringify(msg);
+  };
+
+  const fetchData = async (url, onSuccess, label) => {
     try {
-      const res = await axios.get('/api/operations');
-      if (Array.isArray(res.data)) {
-        setOperations(res.data);
-        // Zsynchronizuj crashingDays ze stanem zapisanym w bazie
-        const map = {};
-        res.data.forEach(op => { map[op.id] = op.crashedDays || 0; });
-        setCrashingDays(map);
-      }
+      const res = await axios.get(url);
+      onSuccess(res.data);
     } catch (err) {
-      console.error("Błąd pobierania danych:", err);
+      console.error(`Błąd pobierania ${label}:`, err);
     }
   };
 
-  const fetchGantt = async () => {
-    try {
-      const res = await axios.get('/api/operations/gantt');
-      setGanttData(res.data);
-    } catch (err) {
-      console.error("Błąd pobierania wykresu Gantta:", err);
-    }
-  };
+  const fetchOperations = () => fetchData('/api/operations', (data) => {
+    if (!Array.isArray(data)) return;
+    setOperations(data);
+    const map = {};
+    data.forEach(op => { map[op.id] = op.crashedDays || 0; });
+    setCrashingDays(map);
+  }, 'danych');
 
-  const fetchGanttLate = async () => {
-    try {
-      const res = await axios.get('/api/operations/gantt-late');
-      setGanttLateData(res.data);
-    } catch (err) {
-      console.error("Błąd pobierania wykresu Gantta (późne starty):", err);
-    }
-  };
+  const fetchGantt = () => fetchData('/api/operations/gantt', setGanttData, 'wykresu Gantta');
+  const fetchGanttLate = () => fetchData('/api/operations/gantt-late', setGanttLateData, 'wykresu Gantta (późne starty)');
 
   const refreshAll = () => {
     fetchOperations();
@@ -477,8 +471,7 @@ function MainApp({ user, onLogout }) {
       setSelectedPredecessors([]);
       refreshAll();
     } catch (err) {
-      const msg = err.response?.data || "Błąd zapisu — upewnij się, że backend działa.";
-      setError(typeof msg === 'string' ? msg : JSON.stringify(msg));
+      setError(extractErrorMsg(err, "Błąd zapisu — upewnij się, że backend działa."));
     }
   };
 
@@ -544,8 +537,7 @@ function MainApp({ user, onLogout }) {
       );
       refreshAll();
     } catch (err) {
-      const msg = err.response?.data || 'Błąd zastosowania skracania.';
-      setError(typeof msg === 'string' ? msg : JSON.stringify(msg));
+      setError(extractErrorMsg(err, 'Błąd zastosowania skracania.'));
     }
   };
 
@@ -565,8 +557,7 @@ function MainApp({ user, onLogout }) {
       setError('');
       setNotice('');
     } catch (err) {
-      const msg = err.response?.data || "Błąd importu — sprawdź format pliku.";
-      setError(typeof msg === 'string' ? msg : JSON.stringify(msg));
+      setError(extractErrorMsg(err, "Błąd importu — sprawdź format pliku."));
     }
     fileInputRef.current.value = '';
   };
@@ -582,9 +573,8 @@ function MainApp({ user, onLogout }) {
       setError('');
       setNotice(res.data?.message || 'Dołączono operacje z pliku.');
     } catch (err) {
-      const msg = err.response?.data || 'Błąd scalania — sprawdź format pliku.';
       setNotice('');
-      setError(typeof msg === 'string' ? msg : JSON.stringify(msg));
+      setError(extractErrorMsg(err, 'Błąd scalania — sprawdź format pliku.'));
     }
     mergeFileInputRef.current.value = '';
   };
@@ -634,13 +624,13 @@ function MainApp({ user, onLogout }) {
       <div style={{ flexShrink: 0, width: '300px' }}>
       <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '8px' }}>
         <label>Nazwa operacji:</label>
-        <input type="text" placeholder="np. Montaż" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+        <input type="text" placeholder="np. Montaż" required value={formData.name} onChange={e => updateForm('name', e.target.value)} />
 
         <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', userSelect: 'none' }}>
           <input
             type="checkbox"
             checked={formData.asap}
-            onChange={e => setFormData({...formData, asap: e.target.checked})}
+            onChange={e => updateForm('asap', e.target.checked)}
             style={{ width: '16px', height: '16px', accentColor: '#28a745', cursor: 'pointer' }}
           />
           <span>Rozpocznij jak najwcześniej (ASAP)</span>
@@ -649,10 +639,10 @@ function MainApp({ user, onLogout }) {
         {!formData.asap && (
           <>
             <label>Czas rozpoczęcia:</label>
-            <input type="datetime-local" required value={formData.startTime} onChange={e => setFormData({...formData, startTime: e.target.value})} />
+            <input type="datetime-local" required value={formData.startTime} onChange={e => updateForm('startTime', e.target.value)} />
 
             <label>Czas zakończenia:</label>
-            <input type="datetime-local" required value={formData.endTime} onChange={e => setFormData({...formData, endTime: e.target.value})} />
+            <input type="datetime-local" required value={formData.endTime} onChange={e => updateForm('endTime', e.target.value)} />
           </>
         )}
 
@@ -667,12 +657,12 @@ function MainApp({ user, onLogout }) {
                 placeholder="np. 8"
                 required
                 value={formData.asapDurationValue}
-                onChange={e => setFormData({...formData, asapDurationValue: e.target.value})}
+                onChange={e => updateForm('asapDurationValue', e.target.value)}
                 style={{ flex: 1 }}
               />
               <select
                 value={formData.asapDurationUnit}
-                onChange={e => setFormData({...formData, asapDurationUnit: e.target.value})}
+                onChange={e => updateForm('asapDurationUnit', e.target.value)}
                 style={{ background: '#333', color: 'white', border: '1px solid #555', borderRadius: '4px', padding: '6px 10px', cursor: 'pointer' }}
               >
                 <option value="hours">godziny</option>
@@ -684,22 +674,22 @@ function MainApp({ user, onLogout }) {
 
         <label>Liczba pracowników:</label>
         <input type="number" min="1" required value={formData.workerCount}
-          onChange={e => setFormData({...formData, workerCount: parseInt(e.target.value) || 1})} />
+          onChange={e => updateForm('workerCount', parseInt(e.target.value) || 1)} />
 
         <label>Zasoby:</label>
-        <input type="text" placeholder="np. Tokarka" value={formData.resources} onChange={e => setFormData({...formData, resources: e.target.value})} />
+        <input type="text" placeholder="np. Tokarka" value={formData.resources} onChange={e => updateForm('resources', e.target.value)} />
 
         <label>Koszt całkowity (PLN):</label>
         <input type="number" step="0.01" value={formData.totalCost}
-          onChange={e => setFormData({...formData, totalCost: parseFloat(e.target.value) || 0})} />
+          onChange={e => updateForm('totalCost', parseFloat(e.target.value) || 0)} />
 
         <label>Koszt skracania za 1 dzień (PLN):</label>
         <input type="number" step="0.01" value={formData.crashingCostPerDay}
-          onChange={e => setFormData({...formData, crashingCostPerDay: parseFloat(e.target.value) || 0})} />
+          onChange={e => updateForm('crashingCostPerDay', parseFloat(e.target.value) || 0)} />
 
         <label>Maksymalne skrócenie (dni):</label>
         <input type="number" min="0" value={formData.maxCrashingDays}
-          onChange={e => setFormData({...formData, maxCrashingDays: parseInt(e.target.value) || 0})} />
+          onChange={e => updateForm('maxCrashingDays', parseInt(e.target.value) || 0)} />
 
         {operations.length > 0 && (
           <>

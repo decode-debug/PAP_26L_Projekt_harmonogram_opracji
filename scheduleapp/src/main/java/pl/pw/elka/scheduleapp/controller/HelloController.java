@@ -46,6 +46,12 @@ import pl.pw.elka.scheduleapp.repository.OperationRepository;
 @RequestMapping("/api")
 public class HelloController {
 
+    private static final String[] GANTT_COLORS = {
+        "#4FC3F7", "#81C784", "#FFB74D", "#E57373",
+        "#BA68C8", "#4DD0E1", "#FFD54F", "#F06292",
+        "#AED581", "#7986CB", "#FF8A65", "#A1887F"
+    };
+
     @Autowired
     private OperationRepository operationRepository;
 
@@ -181,9 +187,7 @@ public class HelloController {
     @GetMapping("/operations/export")
     public ResponseEntity<byte[]> exportOperations() {
         try {
-            ObjectMapper mapper = new ObjectMapper();
-            mapper.registerModule(new JavaTimeModule());
-            byte[] jsonBytes = mapper.writerWithDefaultPrettyPrinter()
+            byte[] jsonBytes = createMapper().writerWithDefaultPrettyPrinter()
                     .writeValueAsBytes(operationRepository.findByUserId(currentUserUuid()));
 
             HttpHeaders headers = new HttpHeaders();
@@ -205,9 +209,7 @@ public class HelloController {
         }
 
         try {
-            ObjectMapper mapper = new ObjectMapper();
-            mapper.registerModule(new JavaTimeModule());
-            List<Operation> operations = mapper.readValue(
+            List<Operation> operations = createMapper().readValue(
                     file.getInputStream(), new TypeReference<List<Operation>>() {});
 
             // Zawsze generuj NOWE UUID-y, aby uniknąć konfliktu unikalności z operacjami
@@ -272,9 +274,7 @@ public class HelloController {
         }
 
         try {
-            ObjectMapper mapper = new ObjectMapper();
-            mapper.registerModule(new JavaTimeModule());
-            List<Operation> operations = mapper.readValue(
+            List<Operation> operations = createMapper().readValue(
                     file.getInputStream(), new TypeReference<List<Operation>>() {});
 
             // Merge preserves UUIDs from the file and skips operations already owned by this user.
@@ -430,7 +430,14 @@ public class HelloController {
         return map;
     }
 
-    /** Buduje mapę numer porządkowy (1,2,3...) → operacja, sortując wg ID */
+    /** Buduje mapę id → operacja */
+    private Map<Long, Operation> buildDbIdMap(List<Operation> operations) {
+        Map<Long, Operation> map = new HashMap<>();
+        for (Operation op : operations) map.put(op.getId(), op);
+        return map;
+    }
+
+    /** Buduje numer porządkowy (1,2,3...) → operacja, sortując wg ID */
     private Map<Long, Operation> buildOrdinalMap(List<Operation> operations) {
         List<Operation> sorted = new ArrayList<>(operations);
         sorted.sort(Comparator.comparing(Operation::getId));
@@ -442,6 +449,60 @@ public class HelloController {
     }
 
     // ======================== GANTT ENDPOINTS ========================
+
+    private ObjectMapper createMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.registerModule(new JavaTimeModule());
+        return mapper;
+    }
+
+    private LocalDateTime computeProjectStart(List<Operation> operations) {
+        return operations.stream()
+                .filter(op -> !Boolean.TRUE.equals(op.getAsap()))
+                .map(Operation::getStartTime).filter(t -> t != null)
+                .min(Comparator.naturalOrder()).orElse(LocalDateTime.now());
+    }
+
+    private LocalDateTime computeProjectEnd(List<Operation> operations,
+            LocalDateTime projectStart, Map<String, LocalDateTime[]> asapTimes) {
+        LocalDateTime projectEnd = projectStart.plusDays(1);
+        for (Operation op : operations) {
+            LocalDateTime end;
+            if (Boolean.TRUE.equals(op.getAsap()) && op.getUuid() != null) {
+                LocalDateTime[] times = asapTimes.get(op.getUuid());
+                end = times != null ? times[1] : null;
+            } else {
+                end = op.getEffectiveEndTime();
+            }
+            if (end != null && end.isAfter(projectEnd)) projectEnd = end;
+        }
+        return projectEnd;
+    }
+
+    private GanttBarDTO buildGanttBar(Operation op, LocalDateTime startT, LocalDateTime endT,
+            LocalDateTime projectStart, String color,
+            Map<String, Operation> uuidToOp, Map<Long, Operation> dbIdToOp, Map<Long, Operation> ordinalToOp) {
+        double startOffsetHours = Duration.between(projectStart, startT).toMinutes() / 60.0;
+        double durationHours = Duration.between(startT, endT).toMinutes() / 60.0;
+
+        GanttBarDTO bar = new GanttBarDTO();
+        bar.setOperationId(op.getId());
+        bar.setName(op.getName());
+        bar.setStartTime(startT);
+        bar.setEndTime(endT);
+        bar.setStartOffsetDays(startOffsetHours / 24.0);
+        bar.setDurationDays(durationHours / 24.0);
+        bar.setWorkerCount(op.getWorkerCount() != null ? op.getWorkerCount() : 0);
+        bar.setResources(op.getResources());
+        bar.setColor(color);
+
+        List<Long> predDbIds = new ArrayList<>();
+        for (Operation pred : resolvePredecessorOps(op.getPredecessorIds(), uuidToOp, dbIdToOp, ordinalToOp)) {
+            predDbIds.add(pred.getId());
+        }
+        bar.setPredecessorIds(predDbIds);
+        return bar;
+    }
 
     /**
      * Oblicza efektywne czasy startów i zakończeń operacji ASAP.
@@ -524,46 +585,18 @@ public class HelloController {
             return ResponseEntity.ok(new GanttChartDTO(null, null, 0, List.of()));
         }
 
-        // Sortuj po startTime (ASAP na końcu wstępnie)
         operations.sort(Comparator.comparing(Operation::getStartTime,
                 Comparator.nullsLast(Comparator.naturalOrder())));
 
-        // Mapy do rozwiązywania poprzedników
         Map<String, Operation> uuidToOp = buildUuidMap(operations);
-        Map<Long, Operation> dbIdToOp = new HashMap<>();
-        for (Operation op : operations) dbIdToOp.put(op.getId(), op);
+        Map<Long, Operation> dbIdToOp = buildDbIdMap(operations);
         Map<Long, Operation> ordinalToOp = buildOrdinalMap(operations);
 
-        // Oblicz granice projektu (na podstawie operacji ze stałymi datami)
-        LocalDateTime projectStart = operations.stream()
-                .filter(op -> !Boolean.TRUE.equals(op.getAsap()))
-                .map(Operation::getStartTime).filter(t -> t != null)
-                .min(Comparator.naturalOrder()).orElse(LocalDateTime.now());
-
-        // Oblicz czasy ASAP
+        LocalDateTime projectStart = computeProjectStart(operations);
         Map<String, LocalDateTime[]> asapTimes = computeAsapTimes(operations, uuidToOp, dbIdToOp, ordinalToOp, projectStart);
+        LocalDateTime projectEnd = computeProjectEnd(operations, projectStart, asapTimes);
 
-        // Wyznacz faktyczny koniec projektu (uwzględnia ASAP)
-        LocalDateTime projectEnd = projectStart.plusDays(1);
-        for (Operation op : operations) {
-            LocalDateTime end;
-            if (Boolean.TRUE.equals(op.getAsap()) && op.getUuid() != null) {
-                LocalDateTime[] times = asapTimes.get(op.getUuid());
-                end = times != null ? times[1] : null;
-            } else {
-                end = op.getEffectiveEndTime();
-            }
-            if (end != null && end.isAfter(projectEnd)) projectEnd = end;
-        }
-
-        double totalHours = Duration.between(projectStart, projectEnd).toMinutes() / 60.0;
-        double totalDays = Math.max(totalHours / 24.0, 0.01);
-
-        String[] colors = {
-            "#4FC3F7", "#81C784", "#FFB74D", "#E57373",
-            "#BA68C8", "#4DD0E1", "#FFD54F", "#F06292",
-            "#AED581", "#7986CB", "#FF8A65", "#A1887F"
-        };
+        double totalDays = Math.max(Duration.between(projectStart, projectEnd).toMinutes() / 60.0 / 24.0, 0.01);
 
         List<GanttBarDTO> bars = new ArrayList<>();
         for (int i = 0; i < operations.size(); i++) {
@@ -579,28 +612,7 @@ public class HelloController {
                 startT = op.getStartTime();
                 endT = op.getEffectiveEndTime();
             }
-
-            double startOffsetHours = Duration.between(projectStart, startT).toMinutes() / 60.0;
-            double durationHours = Duration.between(startT, endT).toMinutes() / 60.0;
-
-            GanttBarDTO bar = new GanttBarDTO();
-            bar.setOperationId(op.getId());
-            bar.setName(op.getName());
-            bar.setStartTime(startT);
-            bar.setEndTime(endT);
-            bar.setStartOffsetDays(startOffsetHours / 24.0);
-            bar.setDurationDays(durationHours / 24.0);
-            bar.setWorkerCount(op.getWorkerCount() != null ? op.getWorkerCount() : 0);
-            bar.setResources(op.getResources());
-            bar.setColor(colors[i % colors.length]);
-
-            List<Long> predDbIds = new ArrayList<>();
-            for (Operation pred : resolvePredecessorOps(op.getPredecessorIds(), uuidToOp, dbIdToOp, ordinalToOp)) {
-                predDbIds.add(pred.getId());
-            }
-            bar.setPredecessorIds(predDbIds);
-
-            bars.add(bar);
+            bars.add(buildGanttBar(op, startT, endT, projectStart, GANTT_COLORS[i % GANTT_COLORS.length], uuidToOp, dbIdToOp, ordinalToOp));
         }
 
         return ResponseEntity.ok(new GanttChartDTO(projectStart, projectEnd, totalDays, bars));
@@ -614,33 +626,13 @@ public class HelloController {
             return ResponseEntity.ok(new GanttChartDTO(null, null, 0, List.of()));
         }
 
-        // Mapy do rozwiązywania poprzedników
         Map<String, Operation> uuidToOp = buildUuidMap(operations);
-        Map<Long, Operation> dbIdToOp = new HashMap<>();
-        for (Operation op : operations) dbIdToOp.put(op.getId(), op);
+        Map<Long, Operation> dbIdToOp = buildDbIdMap(operations);
         Map<Long, Operation> ordinalToOp = buildOrdinalMap(operations);
 
-        // Oblicz granice projektu (gantt-late)
-        LocalDateTime projectStart = operations.stream()
-                .filter(op -> !Boolean.TRUE.equals(op.getAsap()))
-                .map(Operation::getStartTime).filter(t -> t != null)
-                .min(Comparator.naturalOrder()).orElse(LocalDateTime.now());
-
-        // Oblicz czasy ASAP (potrzebne do wyznaczenia projectEnd i czasu trwania)
+        LocalDateTime projectStart = computeProjectStart(operations);
         Map<String, LocalDateTime[]> asapTimes = computeAsapTimes(operations, uuidToOp, dbIdToOp, ordinalToOp, projectStart);
-
-        LocalDateTime projectEnd = projectStart.plusDays(1);
-        for (Operation op : operations) {
-            LocalDateTime end;
-            if (Boolean.TRUE.equals(op.getAsap()) && op.getUuid() != null) {
-                LocalDateTime[] times = asapTimes.get(op.getUuid());
-                end = times != null ? times[1] : null;
-            } else {
-                end = op.getEffectiveEndTime();
-            }
-            if (end != null && end.isAfter(projectEnd)) projectEnd = end;
-        }
-        final LocalDateTime finalProjectEnd = projectEnd;
+        final LocalDateTime projectEnd = computeProjectEnd(operations, projectStart, asapTimes);
 
         Map<String, Set<String>> successors = new HashMap<>();
         for (Operation op : operations) {
@@ -660,23 +652,15 @@ public class HelloController {
         Set<String> computed = new HashSet<>();
         for (Operation op : operations) {
             if (op.getUuid() != null) {
-                computeLateFinishByUuid(op.getUuid(), uuidToOp, successors, lateFinish, lateStart, computed, finalProjectEnd, asapTimes);
+                computeLateFinishByUuid(op.getUuid(), uuidToOp, successors, lateFinish, lateStart, computed, projectEnd, asapTimes);
             }
         }
 
-        double totalHours = Duration.between(projectStart, finalProjectEnd).toMinutes() / 60.0;
-        double totalDays = Math.max(totalHours / 24.0, 0.01);
+        double totalDays = Math.max(Duration.between(projectStart, projectEnd).toMinutes() / 60.0 / 24.0, 0.01);
 
-        // Sortuj po LS
         List<Operation> sortedOps = new ArrayList<>(operations);
         sortedOps.sort(Comparator.comparing(op ->
-            op.getUuid() != null ? lateStart.getOrDefault(op.getUuid(), finalProjectEnd) : finalProjectEnd));
-
-        String[] colors = {
-            "#4FC3F7", "#81C784", "#FFB74D", "#E57373",
-            "#BA68C8", "#4DD0E1", "#FFD54F", "#F06292",
-            "#AED581", "#7986CB", "#FF8A65", "#A1887F"
-        };
+            op.getUuid() != null ? lateStart.getOrDefault(op.getUuid(), projectEnd) : projectEnd));
 
         List<GanttBarDTO> bars = new ArrayList<>();
         for (int i = 0; i < sortedOps.size(); i++) {
@@ -687,30 +671,10 @@ public class HelloController {
             LocalDateTime lf = lateFinish.get(op.getUuid());
             if (ls == null || lf == null) continue;
 
-            double startOffsetHours = Duration.between(projectStart, ls).toMinutes() / 60.0;
-            double durationHours = Duration.between(ls, lf).toMinutes() / 60.0;
-
-            GanttBarDTO bar = new GanttBarDTO();
-            bar.setOperationId(op.getId());
-            bar.setName(op.getName());
-            bar.setStartTime(ls);
-            bar.setEndTime(lf);
-            bar.setStartOffsetDays(startOffsetHours / 24.0);
-            bar.setDurationDays(durationHours / 24.0);
-            bar.setWorkerCount(op.getWorkerCount() != null ? op.getWorkerCount() : 0);
-            bar.setResources(op.getResources());
-            bar.setColor(colors[i % colors.length]);
-
-            List<Long> predDbIds = new ArrayList<>();
-            for (Operation pred : resolvePredecessorOps(op.getPredecessorIds(), uuidToOp, dbIdToOp, ordinalToOp)) {
-                predDbIds.add(pred.getId());
-            }
-            bar.setPredecessorIds(predDbIds);
-
-            bars.add(bar);
+            bars.add(buildGanttBar(op, ls, lf, projectStart, GANTT_COLORS[i % GANTT_COLORS.length], uuidToOp, dbIdToOp, ordinalToOp));
         }
 
-        return ResponseEntity.ok(new GanttChartDTO(projectStart, finalProjectEnd, totalDays, bars));
+        return ResponseEntity.ok(new GanttChartDTO(projectStart, projectEnd, totalDays, bars));
     }
 
     /**
